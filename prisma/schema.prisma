@@ -1,0 +1,562 @@
+// LinkedIn Outreach Operations Platform - data model
+//
+// Target: PostgreSQL only. The duplicate-protection guarantees in this schema rely on
+// PostgreSQL partial unique indexes and `FOR UPDATE SKIP LOCKED`, neither of which SQLite
+// can express. Do not switch the provider.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: connection URLs live in `prisma.config.ts`, not here. The runtime
+// connection is supplied by a driver adapter (`@prisma/adapter-pg`) in
+// `src/lib/db.ts`; the CLI reads its URL from the config file.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum LeadStatus {
+  PENDING
+  PROCESSING
+  SENT
+  ALREADY_CONNECTED
+  ALREADY_PENDING
+  SKIPPED
+  FAILED
+  REQUIRES_REVIEW
+  BLOCKED
+}
+
+enum CampaignStatus {
+  DRAFT
+  READY
+  RUNNING
+  PAUSED
+  COMPLETED
+  ERROR
+}
+
+/// CONNECT is the only action the worker implements. The others exist so the schema and queue
+/// do not need migrating when they are added; the worker rejects them explicitly today.
+enum QueueAction {
+  CONNECT
+  MESSAGE
+  FOLLOW
+  PROFILE_VISIT
+}
+
+enum QueueStatus {
+  WAITING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REQUIRES_REVIEW
+}
+
+/// Deterministic page classifications produced by the detector module in the worker.
+enum PageState {
+  AUTHENTICATED
+  LOGIN_REQUIRED
+  PROFILE_FOUND
+  PROFILE_NOT_FOUND
+  ALREADY_CONNECTED
+  INVITATION_PENDING
+  CONNECT_AVAILABLE
+  SECURITY_CHALLENGE
+  CAPTCHA
+  ACCOUNT_RESTRICTED
+  UNKNOWN_PAGE
+  NETWORK_ERROR
+}
+
+enum WorkerStatus {
+  STARTING
+  IDLE
+  RUNNING
+  PAUSED
+  DRAINING
+  STOPPED
+  UNHEALTHY
+}
+
+enum BrowserStatus {
+  CLOSED
+  LAUNCHING
+  OPEN
+  CRASHED
+}
+
+enum SessionStatus {
+  UNKNOWN
+  CONNECTED
+  DISCONNECTED
+  LOGIN_REQUIRED
+  CHALLENGE_DETECTED
+}
+
+enum IncidentType {
+  LOGIN_REQUIRED
+  CAPTCHA
+  SECURITY_CHALLENGE
+  ACCOUNT_RESTRICTED
+  UNEXPECTED_PAGE
+  PROFILE_UNPROCESSABLE
+  BROWSER_ERROR
+  NETWORK_FAILURE
+  WORKER_UNHEALTHY
+  DUPLICATE_GUARD_TRIGGERED
+  CONFIGURATION_ERROR
+}
+
+enum IncidentSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+/// How a failure should be treated. TECHNICAL is retried with exponential backoff.
+/// SAFETY is never retried - it latches the kill switch and requires a human.
+/// PERMANENT is not retried but is not a safety event either (e.g. profile 404).
+enum ErrorClass {
+  NONE
+  TECHNICAL
+  PERMANENT
+  SAFETY
+}
+
+enum ActivityAction {
+  // Lead-level outreach actions
+  CONNECT
+  MESSAGE
+  FOLLOW
+  PROFILE_VISIT
+  // Lead lifecycle
+  LEADS_IMPORTED
+  LEAD_SKIPPED
+  LEAD_STATUS_CHANGED
+  LEAD_DELETED
+  // Campaign lifecycle
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  CAMPAIGN_ACTIVATED
+  CAMPAIGN_PAUSED
+  CAMPAIGN_RESUMED
+  CAMPAIGN_COMPLETED
+  CAMPAIGN_ERROR
+  // Queue lifecycle
+  QUEUE_GENERATED
+  JOB_CLAIMED
+  JOB_COMPLETED
+  JOB_FAILED
+  JOB_CANCELLED
+  JOB_RETRY_SCHEDULED
+  // Worker lifecycle
+  WORKER_REGISTERED
+  WORKER_HEARTBEAT_STALE
+  WORKER_STOPPED
+  SESSION_STATUS_CHANGED
+  // Safety
+  EMERGENCY_STOP
+  EMERGENCY_STOP_CLEARED
+  INCIDENT_OPENED
+  INCIDENT_RESOLVED
+  // Config / auth
+  TEMPLATE_CREATED
+  TEMPLATE_UPDATED
+  SETTINGS_UPDATED
+  USER_LOGIN
+}
+
+enum ActivityResult {
+  SUCCESS
+  ALREADY_CONNECTED
+  ALREADY_PENDING
+  SKIPPED
+  FAILED
+  REQUIRES_REVIEW
+  CANCELLED
+  INFO
+}
+
+enum ActorType {
+  USER
+  WORKER
+  SYSTEM
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         String    @default("OPERATOR")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  campaigns Campaign[]
+
+  @@map("users")
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  description String?
+  status      CampaignStatus @default(DRAFT)
+
+  /// Explicit operator activation. A campaign never runs on status alone - the scheduler
+  /// requires `active == true` AND `status == RUNNING`.
+  active      Boolean   @default(false)
+  activatedAt DateTime?
+  activatedBy String?
+  pausedAt    DateTime?
+  pausedBy    String?
+  pauseReason String?
+  completedAt DateTime?
+  lastError   String?
+
+  messageTemplateId String?
+  messageTemplate   MessageTemplate? @relation(fields: [messageTemplateId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings     CampaignSettings?
+  leads        Lead[]
+  queueJobs    QueueJob[]
+  activityLogs ActivityLog[]
+  incidents    Incident[]
+
+  @@index([status])
+  @@index([active, status])
+  @@map("campaigns")
+}
+
+model CampaignSettings {
+  id         String   @id @default(cuid())
+  campaignId String   @unique
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// IANA timezone name, e.g. "Europe/Berlin". All operating-hour maths happens in this zone.
+  timezone String @default("UTC")
+
+  /// Maximum actions the campaign may perform per calendar day *in `timezone`*.
+  dailyLimit Int @default(20)
+
+  /// Minutes from local midnight. 540 = 09:00, 1020 = 17:00.
+  windowStartMinute Int @default(540)
+  windowEndMinute   Int @default(1020)
+
+  /// ISO weekdays permitted: 1 = Monday ... 7 = Sunday.
+  operatingDays Int[] @default([1, 2, 3, 4, 5])
+
+  /// Spacing between actions. Not an evasion mechanism - it keeps the campaign comfortably
+  /// under the configured limit and spreads the work across the operating window.
+  minActionDelaySeconds Int @default(45)
+  maxActionDelaySeconds Int @default(180)
+
+  /// Per-lead retry ceiling for TECHNICAL failures.
+  maxAttemptsPerLead Int @default(3)
+
+  /// Halt this campaign as soon as any incident is opened against it.
+  pauseOnIncident Boolean @default(true)
+
+  /// Skip (rather than send a broken note to) leads whose template variables cannot be
+  /// resolved, so a template containing {{firstName}} can never render an empty greeting.
+  skipLeadsMissingTemplateVars Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("campaign_settings")
+}
+
+model MessageTemplate {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  /// The connection-note body. Supports {{firstName}} {{lastName}} {{company}} {{jobTitle}}.
+  body String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@map("message_templates")
+}
+
+model Lead {
+  id        String  @id @default(cuid())
+  firstName String?
+  lastName  String?
+  fullName  String
+
+  /// Normalised canonical profile URL: https://www.linkedin.com/in/<slug>
+  /// Globally unique - the same person can never exist twice, in any campaign.
+  linkedinUrl String @unique
+
+  /// Slug portion of the normalised URL, kept for display and lookup.
+  publicIdentifier String
+
+  /// Exactly what the CSV contained, retained for auditing the import.
+  sourceUrl String?
+
+  company  String?
+  jobTitle String?
+  location String?
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  status        LeadStatus @default(PENDING)
+  attempts      Int        @default(0)
+  lastAttemptAt DateTime?
+  lastResult    String?
+  notes         String?
+
+  /// Set once an invitation is confirmed sent. The presence of this timestamp is a hard
+  /// duplicate-send guard, checked before every CONNECT.
+  invitationSentAt DateTime?
+
+  importBatchId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  queueJobs    QueueJob[]
+  activityLogs ActivityLog[]
+  incidents    Incident[]
+
+  @@index([status])
+  @@index([campaignId, status])
+  @@index([publicIdentifier])
+  @@index([importBatchId])
+  @@index([campaignId, status, createdAt])
+  @@map("leads")
+}
+
+model QueueJob {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  action QueueAction @default(CONNECT)
+  status QueueStatus @default(WAITING)
+
+  /// Lower runs first. Manual/expedited jobs use a negative priority.
+  priority Int @default(100)
+
+  scheduledFor DateTime
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3)
+  nextAttemptAt DateTime?
+
+  error      String?
+  errorClass ErrorClass @default(NONE)
+
+  /// Terminal outcome, e.g. "SENT", "ALREADY_PENDING".
+  result String?
+  /// The verified post-action page classification the result was derived from.
+  resultPageState PageState?
+  resultDetail    Json?
+
+  /// Claim bookkeeping. `claimToken` must be presented to complete or fail the job, so a
+  /// zombie worker cannot report on a job that was reclaimed after its lease expired.
+  claimedByWorkerId String?
+  claimedBy         Worker?   @relation(fields: [claimedByWorkerId], references: [id], onDelete: SetNull)
+  claimToken        String?
+  claimedAt         DateTime?
+  claimExpiresAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activityLogs ActivityLog[]
+  incidents    Incident[]
+
+  @@index([status, scheduledFor])
+  @@index([campaignId, status])
+  @@index([leadId])
+  @@index([status, campaignId, priority, scheduledFor])
+  @@index([claimedByWorkerId])
+  @@index([claimExpiresAt])
+  @@map("queue_jobs")
+}
+
+model Worker {
+  id       String @id @default(cuid())
+  name     String
+  hostname String
+  pid      Int
+  version  String @default("1.0.0")
+
+  status        WorkerStatus  @default(STARTING)
+  browserStatus BrowserStatus @default(CLOSED)
+  sessionStatus SessionStatus @default(UNKNOWN)
+
+  currentJobId String?
+
+  lastHeartbeatAt DateTime @default(now())
+
+  /// Exclusive-run lease. While this is in the future for a live worker, no second worker
+  /// may register without an explicit forced takeover.
+  leaseExpiresAt DateTime?
+
+  startedAt DateTime  @default(now())
+  stoppedAt DateTime?
+
+  jobsProcessed Int     @default(0)
+  jobsFailed    Int     @default(0)
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  queueJobs    QueueJob[]
+  activityLogs ActivityLog[]
+  incidents    Incident[]
+
+  @@index([status])
+  @@index([lastHeartbeatAt])
+  @@map("workers")
+}
+
+/// Append-only. A database trigger (see migration) rejects UPDATE and DELETE on this table.
+model ActivityLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  action ActivityAction
+  result ActivityResult
+
+  actorType ActorType @default(SYSTEM)
+  actorId   String?
+  actorName String?
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  queueJobId String?
+  queueJob   QueueJob? @relation(fields: [queueJobId], references: [id], onDelete: SetNull)
+
+  workerId String?
+  worker   Worker? @relation(fields: [workerId], references: [id], onDelete: SetNull)
+
+  incidentId String?
+
+  message        String?
+  error          String?
+  pageState      PageState?
+  screenshotPath String?
+  durationMs     Int?
+  metadata       Json?
+
+  @@index([createdAt])
+  @@index([campaignId, createdAt])
+  @@index([leadId, createdAt])
+  @@index([action, createdAt])
+  @@index([result, createdAt])
+  @@index([workerId, createdAt])
+  @@map("activity_logs")
+}
+
+model Incident {
+  id       String           @id @default(cuid())
+  type     IncidentType
+  severity IncidentSeverity @default(WARNING)
+  status   IncidentStatus   @default(OPEN)
+
+  title       String
+  description String
+
+  /// True for incidents that must keep the worker paused until a human resolves them.
+  blocksWorker Boolean @default(true)
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  queueJobId String?
+  queueJob   QueueJob? @relation(fields: [queueJobId], references: [id], onDelete: SetNull)
+
+  workerId String?
+  worker   Worker? @relation(fields: [workerId], references: [id], onDelete: SetNull)
+
+  pageState      PageState?
+  pageUrl        String?
+  screenshotPath String?
+  detail         Json?
+
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  resolutionNote String?
+
+  /// What the operator chose to do with the affected lead when resolving.
+  resolutionAction String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([status, blocksWorker])
+  @@index([type, status])
+  @@index([campaignId, status])
+  @@map("incidents")
+}
+
+/// Single-row table (id is pinned to "singleton") holding global runtime state.
+/// Persisted so the kill switch survives restarts of both the app and the worker.
+model SystemState {
+  id String @id @default("singleton")
+
+  killSwitchEngaged   Boolean   @default(false)
+  killSwitchReason    String?
+  killSwitchEngagedAt DateTime?
+  killSwitchEngagedBy String?
+
+  /// The worker currently holding the exclusive run lease.
+  activeWorkerId String?
+
+  /// Bumped every time the kill switch changes, so a polling worker can cheaply detect
+  /// that it must stop.
+  controlEpoch Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("system_state")
+}
