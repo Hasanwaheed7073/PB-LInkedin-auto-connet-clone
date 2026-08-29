@@ -32,6 +32,16 @@
       "disqualifies": true
     },
     {
+      "label": "publicly asked to be hired",
+      "match": [
+        "publicly asked to be hired"
+      ],
+      "points": 30,
+      "fields": [
+        "extra"
+      ]
+    },
+    {
       "label": "explicitly and actively searching",
       "match": [
         "actively seeking",
@@ -183,10 +193,7 @@
         "visa",
         "h1b",
         "h-1b",
-        "opt",
-        "cpt",
         "green card",
-        "relocat",
         "career change",
         "career transition",
         "pivot",
@@ -207,7 +214,7 @@
         "nationwide",
         "open to relocation"
       ],
-      "points": 8
+      "points": 3
     },
     {
       "label": "contract or C2C, buying a full-time search is less likely",
