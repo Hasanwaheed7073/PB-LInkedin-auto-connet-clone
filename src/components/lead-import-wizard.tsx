@@ -214,7 +214,8 @@ export function LeadImportWizard({
                   than applied quietly. */}
               {preview.detection.skippedLeadingRows > 0 ||
               preview.detection.headerless ||
-              preview.detection.urlColumnFoundByContent ? (
+              preview.detection.urlColumnFoundByContent ||
+              preview.detection.fuzzyMatchedColumns.length > 0 ? (
                 <Callout tone="warning" title="How this file was read">
                   <ul className="list-disc pl-5">
                     {preview.detection.skippedLeadingRows > 0 ? (
@@ -235,6 +236,12 @@ export function LeadImportWizard({
                         No column was named like a profile URL, so &ldquo;
                         {preview.detection.urlColumnFoundByContent}&rdquo; was used because its
                         values are LinkedIn profile URLs.
+                      </li>
+                    ) : null}
+                    {preview.detection.fuzzyMatchedColumns.length > 0 ? (
+                      <li>
+                        Matched on partial column names:{' '}
+                        {preview.detection.fuzzyMatchedColumns.join(', ')}.
                       </li>
                     ) : null}
                   </ul>

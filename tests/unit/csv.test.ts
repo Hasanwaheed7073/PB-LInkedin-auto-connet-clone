@@ -51,10 +51,44 @@ describe('mapColumns', () => {
     expect(unmatchedHeaders).toEqual(['Lead Score', 'Weird Column']);
   });
 
-  it('does not let a second column steal a field already claimed', () => {
+  it('prefers the better-named column over the earlier one', () => {
     const { mapping, unmatchedHeaders } = mapColumns(['url', 'linkedinUrl']);
-    expect(mapping.linkedinUrl).toBe('url');
-    expect(unmatchedHeaders).toContain('linkedinUrl');
+    expect(mapping.linkedinUrl).toBe('linkedinUrl');
+    expect(unmatchedHeaders).toContain('url');
+  });
+
+  it('maps the title from "Job Title" even when "Headline" comes first', () => {
+    // Both name the same field. Column order must not decide which wins:
+    // exports exist where one of the two is present but empty.
+    const { mapping, unmatchedHeaders } = mapColumns([
+      'Status',
+      'Name',
+      'Headline',
+      'Company',
+      'Job Title',
+    ]);
+    expect(mapping.jobTitle).toBe('Job Title');
+    expect(unmatchedHeaders).toContain('Headline');
+  });
+
+  it('reports every losing candidate as ignored rather than dropping it silently', () => {
+    const { mapping, unmatchedHeaders } = mapColumns(['profile', 'link', 'linkedinUrl']);
+    expect(mapping.linkedinUrl).toBe('linkedinUrl');
+    expect(unmatchedHeaders).toEqual(expect.arrayContaining(['profile', 'link']));
+  });
+
+  it('falls back to a partial header match and reports it', () => {
+    const { mapping, fuzzyMatched } = mapColumns(['Rank', 'Name', 'Target Role(s)', 'Public Profile URL']);
+    expect(mapping.jobTitle).toBe('Target Role(s)');
+    expect(fuzzyMatched.jobTitle).toBe('Target Role(s)');
+  });
+
+  it('does not let a short alias match inside an unrelated header', () => {
+    // "gm" and "co" are aliases, but "Segment" and "Score" are not columns
+    // anyone meant to map.
+    const { mapping } = mapColumns(['Segment', 'Score']);
+    expect(mapping.jobTitle).toBeUndefined();
+    expect(mapping.company).toBeUndefined();
   });
 });
 

@@ -31,7 +31,8 @@
     "db:verify": "tsx scripts/verify-db.ts",
     "db:local:reset": "tsx scripts/local-postgres.ts --reset",
     "e2e:setup": "tsx scripts/e2e-scenario.ts setup",
-    "e2e:report": "tsx scripts/e2e-scenario.ts report"
+    "e2e:report": "tsx scripts/e2e-scenario.ts report",
+    "leads:qualify": "tsx scripts/qualify-leads.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

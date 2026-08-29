@@ -60,34 +60,86 @@ export type ColumnMapping = Partial<Record<FieldName, string>>;
 export function mapColumns(headers: string[]): {
   mapping: ColumnMapping;
   unmatchedHeaders: string[];
+  /** Fields filled by a partial header match rather than an exact alias. */
+  fuzzyMatched: Partial<Record<FieldName, string>>;
 } {
   const mapping: ColumnMapping = {};
   const unmatchedHeaders: string[] = [];
+
+  // Position in a field's alias list is a preference, not a tie-break to be
+  // decided by column order. A file with both "Headline" and "Job Title" must
+  // map the title from "Job Title", whichever column comes first.
+  const best: Partial<Record<FieldName, { header: string; rank: number }>> = {};
 
   for (const header of headers) {
     const normalized = normalizeHeader(header);
     if (normalized.length === 0) continue;
 
     let matched: FieldName | null = null;
+    let rank = Number.MAX_SAFE_INTEGER;
     for (const [field, aliases] of Object.entries(COLUMN_ALIASES) as [
       FieldName,
       readonly string[],
     ][]) {
-      if (aliases.includes(normalized)) {
+      const index = aliases.indexOf(normalized);
+      if (index >= 0) {
         matched = field;
+        rank = index;
         break;
       }
     }
 
-    // Only the first column claiming a field wins; later ones are reported.
-    if (matched && mapping[matched] === undefined) {
-      mapping[matched] = header;
+    if (matched === null) {
+      unmatchedHeaders.push(header);
+      continue;
+    }
+
+    const incumbent = best[matched];
+    if (!incumbent || rank < incumbent.rank) {
+      if (incumbent) unmatchedHeaders.push(incumbent.header);
+      best[matched] = { header, rank };
     } else {
       unmatchedHeaders.push(header);
     }
   }
 
-  return { mapping, unmatchedHeaders };
+  for (const [field, choice] of Object.entries(best) as [
+    FieldName,
+    { header: string; rank: number },
+  ][]) {
+    mapping[field] = choice.header;
+  }
+
+  // Nothing named a field exactly. Fall back to headers that merely contain an
+  // alias - "Target Role(s)" for jobTitle, "Contact Full Name" for fullName.
+  // Reported separately, because a partial match is a guess and the operator
+  // is the one who can tell whether it is the right column.
+  const fuzzyMatched: Partial<Record<FieldName, string>> = {};
+
+  for (const [field, aliases] of Object.entries(COLUMN_ALIASES) as [
+    FieldName,
+    readonly string[],
+  ][]) {
+    if (mapping[field] !== undefined) continue;
+
+    let pick: { header: string; aliasLength: number } | null = null;
+    for (const header of unmatchedHeaders) {
+      const normalized = normalizeHeader(header);
+      // Short aliases such as "gm" or "co" match far too much inside a longer
+      // header, so only substantial ones are allowed to match partially.
+      const hit = aliases.find((alias) => alias.length >= 4 && normalized.includes(alias));
+      if (!hit) continue;
+      if (!pick || hit.length > pick.aliasLength) pick = { header, aliasLength: hit.length };
+    }
+
+    if (pick) {
+      mapping[field] = pick.header;
+      fuzzyMatched[field] = pick.header;
+      unmatchedHeaders.splice(unmatchedHeaders.indexOf(pick.header), 1);
+    }
+  }
+
+  return { mapping, unmatchedHeaders, fuzzyMatched };
 }
 
 /**
@@ -109,6 +161,8 @@ export interface DetectionNotes {
    * looking at its values because no header matched a known alias.
    */
   urlColumnFoundByContent: string | null;
+  /** Fields filled by a partial header match, as "field ← column" pairs. */
+  fuzzyMatchedColumns: string[];
 }
 
 /** How many leading rows may be skipped while hunting for the header. */
@@ -273,7 +327,26 @@ export const MAX_IMPORT_ROWS = 20_000;
  * Parse and classify a CSV file. Never throws on malformed content - problems
  * come back as `parseErrors` or per-row rejections.
  */
-export function analyzeLeadCsv(csvText: string): CsvAnalysis {
+export interface CsvRecords {
+  headers: string[];
+  records: Record<string, string>[];
+  detection: DetectionNotes;
+  mapping: ColumnMapping;
+  unmatchedHeaders: string[];
+  parseErrors: string[];
+  /** File row number a data row came from, counting non-empty rows. */
+  fileRowOf: (dataIndex: number) => number;
+}
+
+/**
+ * Read a CSV of any shape into records plus a column mapping.
+ *
+ * Separate from `analyzeLeadCsv` because qualification wants to read a file
+ * that the importer would reject: a list with no profile URLs is useless to
+ * the worker but still worth scoring, to decide which rows justify the effort
+ * of re-exporting them properly.
+ */
+export function readCsvRecords(csvText: string): CsvRecords {
   // Parsed without a header so the header row can be chosen deliberately:
   // exports often carry banner rows above it, and some files have none at all.
   const parsed = Papa.parse<string[]>(csvText, {
@@ -313,13 +386,14 @@ export function analyzeLeadCsv(csvText: string): CsvAnalysis {
   });
 
   const usableHeaders = headers.filter((h) => h.trim().length > 0);
-  const { mapping, unmatchedHeaders } = mapColumns(usableHeaders);
+  const { mapping, unmatchedHeaders, fuzzyMatched } = mapColumns(usableHeaders);
 
   const detection: DetectionNotes = {
     headerRow: headerless ? 0 : headerIndex + 1,
     skippedLeadingRows: headerless ? 0 : headerIndex,
     headerless,
     urlColumnFoundByContent: null,
+    fuzzyMatchedColumns: Object.entries(fuzzyMatched).map(([f2, h]) => `${f2} ← ${h}`),
   };
 
   // Header names did not identify the URL column, so look at the values.
@@ -332,6 +406,21 @@ export function analyzeLeadCsv(csvText: string): CsvAnalysis {
       if (ignoredAt >= 0) unmatchedHeaders.splice(ignoredAt, 1);
     }
   }
+
+  return {
+    headers: usableHeaders,
+    records,
+    detection,
+    mapping,
+    unmatchedHeaders,
+    parseErrors,
+    fileRowOf,
+  };
+}
+
+export function analyzeLeadCsv(csvText: string): CsvAnalysis {
+  const { headers: usableHeaders, records, detection, mapping, unmatchedHeaders, parseErrors, fileRowOf } =
+    readCsvRecords(csvText);
 
   const analysis: CsvAnalysis = {
     headers: usableHeaders,
