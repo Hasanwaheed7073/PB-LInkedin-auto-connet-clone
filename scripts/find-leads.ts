@@ -25,11 +25,25 @@ import {
   firstNameFromEmail,
   HackerNewsWantsHiredProvider,
 } from '../src/engine/discovery/providers/hacker-news';
+import { ExportImportProvider } from '../src/engine/discovery/providers/export-import';
+import { WebSearchLinkedInProvider } from '../src/engine/discovery/providers/web-search';
 import { isFailure, type DiscoveryProvider, type NormalizedCandidate } from '../src/engine/discovery/types';
 import { scoreLead, HOME_SERVICES_OWNER_ICP, type IcpBand, type IcpProfile } from '../src/lib/icp';
 import { normalizeLinkedInUrl } from '../src/lib/linkedin-url';
 
-const PROVIDERS: DiscoveryProvider[] = [new HackerNewsWantsHiredProvider()];
+/**
+ * Sources are selected per run. Nothing downstream branches on which one a
+ * candidate came from - that is the whole point of the interface.
+ */
+function buildProviders(options: Options): DiscoveryProvider[] {
+  const chosen: DiscoveryProvider[] = [];
+  const want = (id: string) => !options.providers || options.providers.has(id);
+
+  if (want('hn')) chosen.push(new HackerNewsWantsHiredProvider());
+  if (want('search')) chosen.push(new WebSearchLinkedInProvider());
+  for (const path of options.imports) chosen.push(new ExportImportProvider(path, 'phantombuster'));
+  return chosen;
+}
 
 interface Options {
   since: Date | undefined;
@@ -40,6 +54,11 @@ interface Options {
   health: boolean;
   /** Derive band cut-points from this run's distribution instead of the profile. */
   calibrate: boolean;
+  /** Provider ids to run; null means all built-in ones. */
+  providers: Set<string> | null;
+  /** Export files to ingest through the import provider. */
+  imports: string[];
+  keywords: string[];
 }
 
 function parseArgs(argv: string[]): Options {
@@ -51,6 +70,9 @@ function parseArgs(argv: string[]): Options {
     bands: null,
     health: false,
     calibrate: false,
+    providers: null,
+    imports: [],
+    keywords: [],
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -62,6 +84,11 @@ function parseArgs(argv: string[]): Options {
     else if (arg === '--icp') options.icpPath = next();
     else if (arg === '--health') options.health = true;
     else if (arg === '--calibrate') options.calibrate = true;
+    else if (arg === '--import') options.imports.push(next());
+    else if (arg === '--providers')
+      options.providers = new Set(next().split(',').map((p) => p.trim()).filter(Boolean));
+    else if (arg === '--keywords')
+      options.keywords = next().split(',').map((k) => k.trim()).filter(Boolean);
     else if (arg === '--band')
       options.bands = new Set(
         next()
@@ -96,8 +123,10 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const now = Date.now();
 
+  const providers = buildProviders(options);
+
   if (options.health) {
-    for (const provider of PROVIDERS) {
+    for (const provider of providers) {
       const health = await provider.health();
       process.stdout.write(
         `${health.ok ? 'OK  ' : 'FAIL'} ${provider.id.padEnd(28)} ${health.detail}\n`,
@@ -114,8 +143,9 @@ async function main(): Promise<void> {
   const merged = new Map<NormalizedCandidate, Set<string>>();
   const stats = { raw: 0, rejected: 0, duplicates: 0, kept: 0 };
   const rejectionReasons = new Map<string, number>();
+  const degraded: string[] = [];
 
-  for (const provider of PROVIDERS) {
+  for (const provider of providers) {
     const budget = {
       maxRecords: options.limit,
       maxRequests: 40,
@@ -124,31 +154,41 @@ async function main(): Promise<void> {
 
     process.stdout.write(`\nProvider: ${provider.id}\n`);
 
-    for await (const raw of provider.search({ since: options.since }, budget)) {
-      stats.raw += 1;
-      const result = provider.normalize(raw);
+    try {
+      for await (const raw of provider.search(
+        { since: options.since, keywords: options.keywords },
+        budget,
+      )) {
+        stats.raw += 1;
+        const result = provider.normalize(raw);
 
-      if (isFailure(result)) {
-        stats.rejected += 1;
-        rejectionReasons.set(result.reason, (rejectionReasons.get(result.reason) ?? 0) + 1);
-        continue;
+        if (isFailure(result)) {
+          stats.rejected += 1;
+          rejectionReasons.set(result.reason, (rejectionReasons.get(result.reason) ?? 0) + 1);
+          continue;
+        }
+
+        const keys = identityKeys(result);
+        const existing = keys.map((k) => byKey.get(k)).find(Boolean);
+
+        if (existing) {
+          stats.duplicates += 1;
+          // Merge evidence rather than dropping the second sighting.
+          existing.signals.push(...result.signals);
+          merged.get(existing)?.add(result.provenance.sourceUrl);
+          for (const key of keys) if (!byKey.has(key)) byKey.set(key, existing);
+          continue;
+        }
+
+        stats.kept += 1;
+        merged.set(result, new Set([result.provenance.sourceUrl]));
+        for (const key of keys) byKey.set(key, result);
       }
-
-      const keys = identityKeys(result);
-      const existing = keys.map((k) => byKey.get(k)).find(Boolean);
-
-      if (existing) {
-        stats.duplicates += 1;
-        // Merge evidence rather than dropping the second sighting.
-        existing.signals.push(...result.signals);
-        merged.get(existing)?.add(result.provenance.sourceUrl);
-        for (const key of keys) if (!byKey.has(key)) byKey.set(key, existing);
-        continue;
-      }
-
-      stats.kept += 1;
-      merged.set(result, new Set([result.provenance.sourceUrl]));
-      for (const key of keys) byKey.set(key, result);
+    } catch (error) {
+      // One failing source degrades the run and names itself. It must never
+      // look like the other sources simply found less today.
+      degraded.push(`${provider.id}: ${error instanceof Error ? error.message : String(error)}`);
+      process.stdout.write(`  DEGRADED — ${degraded[degraded.length - 1]}\n`);
     }
   }
 
@@ -278,6 +318,12 @@ async function main(): Promise<void> {
     for (const [reason, count] of [...rejectionReasons].sort((a, b) => b[1] - a[1])) {
       out.push(`  ${String(count).padStart(5)}  ${reason}`);
     }
+    out.push('');
+  }
+
+  if (degraded.length > 0) {
+    out.push('RUN DEGRADED — these sources failed and contributed nothing:');
+    for (const d of degraded) out.push(`  ${d}`);
     out.push('');
   }
 
