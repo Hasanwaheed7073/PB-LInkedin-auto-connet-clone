@@ -1,0 +1,245 @@
+{
+  "name": "reverse-recruiting-jobseeker",
+  "description": "Job seekers who are likely to pay for reverse-recruiting. Not the most employable people - the ones whose search is hard, whose signal is recent, and who are senior enough to value their own time.",
+  "hotAt": 70,
+  "warmAt": 50,
+  "coolAt": 30,
+  "rules": [
+    {
+      "label": "recruiter or hiring side, sells to us rather than buys",
+      "match": [
+        "recruiter",
+        "talent acquisition",
+        "hiring manager",
+        "we are hiring",
+        "currently hiring",
+        "headhunter",
+        "staffing"
+      ],
+      "points": 0,
+      "disqualifies": true
+    },
+    {
+      "label": "signal is roughly a year old, the search is over one way or another",
+      "match": [
+        "about 1 year",
+        "1 year",
+        "over a year",
+        "2 years",
+        "18 months"
+      ],
+      "points": 0,
+      "disqualifies": true
+    },
+    {
+      "label": "explicitly and actively searching",
+      "match": [
+        "actively seeking",
+        "actively looking",
+        "actively searching",
+        "open to work",
+        "seeking full-time",
+        "looking for a",
+        "seeking roles",
+        "seeking opportunities"
+      ],
+      "points": 30
+    },
+    {
+      "label": "signal is days or weeks old",
+      "match": [
+        "1 week",
+        "2 weeks",
+        "3 weeks",
+        "days",
+        "this week",
+        "recent post"
+      ],
+      "points": 22
+    },
+    {
+      "label": "signal is about a month old",
+      "match": [
+        "1 month",
+        "4 weeks",
+        "within about 1 month"
+      ],
+      "points": 15
+    },
+    {
+      "label": "signal is a couple of months old",
+      "match": [
+        "2 months",
+        "within about 2 months"
+      ],
+      "points": 8
+    },
+    {
+      "label": "signal is a quarter old, search likely stalled",
+      "match": [
+        "3 months",
+        "4 months",
+        "5 months",
+        "6 months",
+        "within about 3 months"
+      ],
+      "points": -10
+    },
+    {
+      "label": "undated signal, freshness unknown",
+      "match": [
+        "exact date not shown",
+        "current profile title"
+      ],
+      "points": -8
+    },
+    {
+      "label": "senior enough to value their own time",
+      "match": [
+        "senior",
+        "staff",
+        "principal",
+        "lead",
+        "manager",
+        "director",
+        "head of"
+      ],
+      "points": 28
+    },
+    {
+      "label": "mid-career, still a credible buyer",
+      "match": [
+        "mid",
+        "mid/senior"
+      ],
+      "points": 18,
+      "exclude": [
+        "senior",
+        "staff",
+        "principal",
+        "director",
+        "head of"
+      ]
+    },
+    {
+      "label": "entry level, rarely able to pay for the service",
+      "match": [
+        "entry",
+        "junior",
+        "intern",
+        "new grad",
+        "entry/mid"
+      ],
+      "points": -20,
+      "exclude": [
+        "senior",
+        "staff",
+        "principal",
+        "director",
+        "head of",
+        "mid"
+      ]
+    },
+    {
+      "label": "crowded field where applications disappear",
+      "match": [
+        "ai & data",
+        "data",
+        "software engineering",
+        "cybersecurity",
+        "cyber",
+        "software quality",
+        "machine learning",
+        "analytics"
+      ],
+      "points": 22
+    },
+    {
+      "label": "function where search is slow and networked",
+      "match": [
+        "finance & accounting",
+        "hr & hris",
+        "supply chain",
+        "operations",
+        "marketing",
+        "product"
+      ],
+      "points": 14,
+      "exclude": [
+        "ai & data",
+        "data",
+        "software engineering",
+        "cybersecurity",
+        "cyber",
+        "software quality",
+        "machine learning",
+        "analytics"
+      ]
+    },
+    {
+      "label": "search is structurally hard, which is exactly what the service solves",
+      "match": [
+        "sponsorship",
+        "visa",
+        "h1b",
+        "h-1b",
+        "opt",
+        "cpt",
+        "green card",
+        "relocat",
+        "career change",
+        "career transition",
+        "pivot",
+        "returning",
+        "career break",
+        "laid off",
+        "layoff",
+        "role was eliminated"
+      ],
+      "points": 18
+    },
+    {
+      "label": "flexible on location, so more roles are reachable",
+      "match": [
+        "remote",
+        "hybrid",
+        "across the united states",
+        "nationwide",
+        "open to relocation"
+      ],
+      "points": 8
+    },
+    {
+      "label": "contract or C2C, buying a full-time search is less likely",
+      "match": [
+        "contract",
+        "c2c",
+        "1099",
+        "corp to corp",
+        "freelance",
+        "consultant"
+      ],
+      "points": -12
+    },
+    {
+      "label": "source already rated this one top priority",
+      "match": [
+        "hot"
+      ],
+      "points": 10,
+      "fields": [
+        "extra"
+      ]
+    },
+    {
+      "label": "source flagged this one as needing verification",
+      "match": [
+        "verify"
+      ],
+      "points": -12,
+      "fields": [
+        "extra"
+      ]
+    }
+  ]
+}

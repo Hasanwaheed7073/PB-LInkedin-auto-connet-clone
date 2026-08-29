@@ -133,12 +133,20 @@ function main(): void {
     const rawUrl = get(row, 'linkedinUrl');
     const normalized = normalizeLinkedInUrl(rawUrl);
 
+    // Columns the mapper did not claim still carry evidence worth scoring on.
+    const claimed = new Set(Object.values(mapping).filter(Boolean) as string[]);
+    const extra = Object.entries(row)
+      .filter(([header, value]) => !claimed.has(header) && value.trim().length > 0)
+      .map(([header, value]) => `${header}: ${value}`)
+      .join('   ');
+
     const lead = {
       fullName,
       jobTitle: get(row, 'jobTitle'),
       company: get(row, 'company'),
       location: get(row, 'location'),
       linkedinUrl: normalized.ok ? normalized.url : '',
+      extra,
     };
 
     return {
@@ -149,7 +157,7 @@ function main(): void {
   });
 
   // Highest score first; ties broken by row order so runs are reproducible.
-  qualified.sort((a, b) => b.score.score - a.score.score || a.fileRow - b.fileRow);
+  qualified.sort((a, b) => b.score.rawScore - a.score.rawScore || a.fileRow - b.fileRow);
 
   let selected = qualified.filter((q) => q.score.band !== 'Disqualified');
   if (options.bands) selected = selected.filter((q) => options.bands!.has(q.score.band));
