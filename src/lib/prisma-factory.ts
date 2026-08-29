@@ -35,8 +35,56 @@ export function resolveConnectionString(override?: string): string {
   return url;
 }
 
+/**
+ * Move SSL intent out of the connection string and into explicit options.
+ *
+ * Managed Postgres (Supabase's pooler among them) presents a certificate chain
+ * that does not validate against the system trust store, and this `pg` version
+ * treats a bare `sslmode=require` as full verification. The documented
+ * workaround is `uselibpqcompat=true`, which works on some Node versions and,
+ * on Node 24, *hangs the connection instead of failing it* — the worst possible
+ * behaviour, because a timeout looks like a network problem rather than a
+ * configuration one.
+ *
+ * Setting `ssl` directly is unambiguous across versions: the connection is
+ * encrypted, and the certificate is not verified. That is the same security
+ * posture the URL flags were asking for, stated where it cannot be
+ * misinterpreted. Local Postgres (PGlite over plain TCP) keeps SSL off.
+ */
+export function resolveSsl(connectionString: string): {
+  connectionString: string;
+  ssl: PoolConfig['ssl'];
+} {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    return { connectionString, ssl: undefined };
+  }
+
+  const sslmode = url.searchParams.get('sslmode');
+  const libpqCompat = url.searchParams.get('uselibpqcompat');
+  const wantsSsl = sslmode !== null && sslmode !== 'disable';
+
+  url.searchParams.delete('sslmode');
+  url.searchParams.delete('uselibpqcompat');
+
+  if (!wantsSsl && libpqCompat === null) {
+    return { connectionString, ssl: undefined };
+  }
+
+  return {
+    connectionString: url.toString(),
+    // `verify-full` would need the provider's CA bundle shipped with the app.
+    // Until that is done, this is encrypted-but-unverified, deliberately.
+    ssl: sslmode === 'verify-full' ? true : { rejectUnauthorized: false },
+  };
+}
+
 export function buildPoolConfig(options: PrismaFactoryOptions = {}): PoolConfig {
-  const connectionString = resolveConnectionString(options.connectionString);
+  const { connectionString, ssl } = resolveSsl(
+    resolveConnectionString(options.connectionString),
+  );
 
   const envMax = Number(process.env.DATABASE_POOL_MAX);
   const max =
@@ -44,6 +92,7 @@ export function buildPoolConfig(options: PrismaFactoryOptions = {}): PoolConfig 
 
   return {
     connectionString,
+    ssl,
     max,
     // A short idle timeout keeps the single local connection from being held
     // open across a long dev session.

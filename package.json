@@ -33,7 +33,8 @@
     "e2e:setup": "tsx scripts/e2e-scenario.ts setup",
     "e2e:report": "tsx scripts/e2e-scenario.ts report",
     "leads:qualify": "tsx scripts/qualify-leads.ts",
-    "leads:find": "tsx scripts/find-leads.ts"
+    "leads:find": "tsx scripts/find-leads.ts",
+    "leads:import": "tsx scripts/import-leads.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
