@@ -112,7 +112,25 @@ const SELECTORS = {
     'h1:has-text("Page not found")',
   ],
   /** Anchor proving an authenticated session-chrome is present. */
+  /**
+   * Proof that a signed-in page rendered.
+   *
+   * Navigation destinations first, deliberately. LinkedIn now ships hashed
+   * class names (`_5dc4a4cd`, `_723e1cfe`) that change with every build, so a
+   * class-based signature is guaranteed to rot - the five legacy selectors
+   * below match nothing on the current site and are kept only in case an older
+   * surface is served.
+   *
+   * These hrefs are the product's URL structure rather than its styling, and
+   * all three are absent from a logged-out page: visiting /feed/ signed out
+   * redirects to /login/, which carries none of them. Verified against both
+   * states before being trusted, because a false AUTHENTICATED lets the worker
+   * proceed believing it is signed in.
+   */
   authenticatedChrome: [
+    'a[href*="/mynetwork"]',
+    'a[href*="/notifications"]',
+    'a[href*="/messaging"]',
     'nav.global-nav',
     '#global-nav',
     'header.global-nav',
