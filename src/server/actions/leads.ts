@@ -9,6 +9,7 @@ import { actionError, actionOk, validate, type ActionResult } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import {
   analyzeLeadCsv,
+  type DetectionNotes,
   buildImportPreview,
   summarizePreview,
   type ImportPreview,
@@ -47,6 +48,7 @@ export interface ImportPreviewPayload {
   duplicatesInFile: { rowNumber: number; message: string; rawUrl: string }[];
   unmatchedHeaders: string[];
   detectedColumns: Record<string, string | undefined>;
+  detection: DetectionNotes;
   parseErrors: string[];
 }
 
@@ -122,6 +124,7 @@ export async function previewLeadImport(
     })),
     unmatchedHeaders: analysis.unmatchedHeaders,
     detectedColumns: analysis.mapping,
+    detection: analysis.detection,
     parseErrors: analysis.parseErrors,
   });
 }

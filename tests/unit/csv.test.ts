@@ -237,3 +237,91 @@ describe('buildImportPreview', () => {
     });
   });
 });
+
+/**
+ * Files that are not shaped the way the importer would prefer.
+ *
+ * Real exports carry banner rows, unguessable column names, or no header at
+ * all. Reading them is a convenience; inventing a profile URL is not, so the
+ * last case here pins down that a file without URLs stays rejected.
+ */
+describe('awkward file shapes', () => {
+  it('skips banner rows above the real header', () => {
+    const csv = [
+      '100 Public U.S. Job-Seeker Leads — Nationwide,,,',
+      'Reconfirm availability before outreach.,,,',
+      'Rank,Name,Public Profile URL,Notes',
+      '1,Ada Lovelace,https://www.linkedin.com/in/ada-lovelace,Hot',
+      '2,Alan Turing,https://www.linkedin.com/in/alan-turing,Warm',
+    ].join('\n');
+
+    const analysis = analyzeLeadCsv(csv);
+
+    expect(analysis.detection.headerRow).toBe(3);
+    expect(analysis.detection.skippedLeadingRows).toBe(2);
+    expect(analysis.prepared).toHaveLength(2);
+    expect(analysis.prepared[0]).toMatchObject({
+      rowNumber: 4,
+      linkedinUrl: 'https://www.linkedin.com/in/ada-lovelace',
+      fullName: 'Ada Lovelace',
+    });
+  });
+
+  it('finds the URL column by its values when the header name is unguessable', () => {
+    const csv = [
+      'ref,contact,where_they_live_online,segment',
+      '1,Ada Lovelace,https://www.linkedin.com/in/ada-lovelace,A',
+      '2,Alan Turing,linkedin.com/in/alan-turing,B',
+    ].join('\n');
+
+    const analysis = analyzeLeadCsv(csv);
+
+    expect(analysis.detection.urlColumnFoundByContent).toBe('where_they_live_online');
+    expect(analysis.prepared.map((p) => p.linkedinUrl)).toEqual([
+      'https://www.linkedin.com/in/ada-lovelace',
+      'https://www.linkedin.com/in/alan-turing',
+    ]);
+    expect(analysis.unmatchedHeaders).not.toContain('where_they_live_online');
+  });
+
+  it('does not mistake a notes column holding one stray URL for the URL column', () => {
+    const csv = [
+      'person,remark',
+      'Ada Lovelace,met at a conference',
+      'Alan Turing,see https://www.linkedin.com/in/alan-turing',
+      'Grace Hopper,referred by a colleague',
+    ].join('\n');
+
+    const analysis = analyzeLeadCsv(csv);
+
+    expect(analysis.detection.urlColumnFoundByContent).toBeNull();
+    expect(analysis.rejected[0]?.reason).toBe('NO_URL_COLUMN');
+  });
+
+  it('reads a file with no header row at all', () => {
+    const csv = [
+      'https://www.linkedin.com/in/ada-lovelace,Ada Lovelace',
+      'https://www.linkedin.com/in/alan-turing,Alan Turing',
+    ].join('\n');
+
+    const analysis = analyzeLeadCsv(csv);
+
+    expect(analysis.detection.headerless).toBe(true);
+    expect(analysis.prepared).toHaveLength(2);
+    expect(analysis.prepared[0]?.rowNumber).toBe(1);
+  });
+
+  it('rejects a file with no profile URL anywhere and names the columns it saw', () => {
+    const csv = [
+      'Status,Name,Headline,Company,Job Title,Industry',
+      'Not sent yet,Ada Lovelace,,,Maintenance Technician,',
+      'Not sent yet,Alan Turing,,,Comfort Advisor,',
+    ].join('\n');
+
+    const analysis = analyzeLeadCsv(csv);
+
+    expect(analysis.prepared).toHaveLength(0);
+    expect(analysis.rejected[0]?.reason).toBe('NO_URL_COLUMN');
+    expect(analysis.rejected[0]?.message).toContain('Status, Name, Headline');
+  });
+});

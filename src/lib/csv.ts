@@ -90,6 +90,118 @@ export function mapColumns(headers: string[]): {
   return { mapping, unmatchedHeaders };
 }
 
+/**
+ * How the file was interpreted before a single row was read.
+ *
+ * Every value here is shown to the operator. Guessing at a file's shape is
+ * only acceptable if the guess is stated out loud - a silently chosen column
+ * is how the wrong 600 people get invited.
+ */
+export interface DetectionNotes {
+  /** 1-based position of the row used as the header, among non-empty rows. */
+  headerRow: number;
+  /** Rows above the header that were skipped as banner or title text. */
+  skippedLeadingRows: number;
+  /** True when no row looked like a header and synthetic names were used. */
+  headerless: boolean;
+  /**
+   * Set to the column name when the profile URL column was identified by
+   * looking at its values because no header matched a known alias.
+   */
+  urlColumnFoundByContent: string | null;
+}
+
+/** How many leading rows may be skipped while hunting for the header. */
+const MAX_HEADER_SEARCH_ROWS = 25;
+
+/** Rows sampled when identifying a column by its contents. */
+const CONTENT_SAMPLE_ROWS = 200;
+
+/**
+ * Score a row's plausibility as the header: how many distinct fields its cells
+ * name. A banner row ("100 Public U.S. Job-Seeker Leads") scores zero.
+ */
+function headerScore(cells: string[]): number {
+  const matched = new Set<FieldName>();
+  for (const cell of cells) {
+    const normalized = normalizeHeader(cell);
+    if (normalized.length === 0) continue;
+    for (const [field, aliases] of Object.entries(COLUMN_ALIASES) as [
+      FieldName,
+      readonly string[],
+    ][]) {
+      if (aliases.includes(normalized)) matched.add(field);
+    }
+  }
+  return matched.size;
+}
+
+/** True when a row carries at least one usable LinkedIn profile URL. */
+function rowHasProfileUrl(cells: string[]): boolean {
+  return cells.some((cell) => normalizeLinkedInUrl(cell).ok);
+}
+
+/**
+ * Pick the header row. Exports routinely carry a title and a disclaimer above
+ * the real header, and some files have no header at all.
+ */
+export function chooseHeaderRow(rows: string[][]): {
+  headerIndex: number;
+  headerless: boolean;
+} {
+  const limit = Math.min(rows.length, MAX_HEADER_SEARCH_ROWS);
+
+  let bestIndex = -1;
+  let bestScore = 0;
+  for (let i = 0; i < limit; i += 1) {
+    const score = headerScore(rows[i] ?? []);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestIndex >= 0) return { headerIndex: bestIndex, headerless: false };
+
+  // Nothing named a field. If the very first row already holds a profile URL it
+  // is data, not a header, so keep it and invent column names.
+  if (rows.length > 0 && rowHasProfileUrl(rows[0] ?? [])) {
+    return { headerIndex: -1, headerless: true };
+  }
+
+  return { headerIndex: 0, headerless: false };
+}
+
+/**
+ * Find the profile-URL column by inspecting values rather than headers, for
+ * files whose column is called something unguessable.
+ *
+ * Requires a majority of a column's filled cells to be valid profile URLs, so
+ * a notes column with one URL in it cannot win.
+ */
+export function findUrlColumnByContent(
+  headers: string[],
+  rows: Record<string, string>[],
+): string | null {
+  const sample = rows.slice(0, CONTENT_SAMPLE_ROWS);
+  let best: { header: string; valid: number } | null = null;
+
+  for (const header of headers) {
+    let filled = 0;
+    let valid = 0;
+    for (const row of sample) {
+      const value = (row[header] ?? '').trim();
+      if (value.length === 0) continue;
+      filled += 1;
+      if (normalizeLinkedInUrl(value).ok) valid += 1;
+    }
+    if (valid === 0 || valid * 2 < filled) continue;
+    if (!best || valid > best.valid) best = { header, valid };
+  }
+
+  return best?.header ?? null;
+}
+
 export interface PreparedLead {
   /** 1-based row number in the source file, counting the header as row 1. */
   rowNumber: number;
@@ -126,6 +238,8 @@ export interface RejectedRow {
 export interface CsvAnalysis {
   /** Headers exactly as they appeared in the file. */
   headers: string[];
+  /** What had to be inferred about the file's shape, for the operator to see. */
+  detection: DetectionNotes;
   mapping: ColumnMapping;
   unmatchedHeaders: string[];
   /** Data rows seen, excluding the header. */
@@ -160,26 +274,71 @@ export const MAX_IMPORT_ROWS = 20_000;
  * come back as `parseErrors` or per-row rejections.
  */
 export function analyzeLeadCsv(csvText: string): CsvAnalysis {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
-    header: true,
+  // Parsed without a header so the header row can be chosen deliberately:
+  // exports often carry banner rows above it, and some files have none at all.
+  const parsed = Papa.parse<string[]>(csvText, {
+    header: false,
     skipEmptyLines: 'greedy',
-    transformHeader: (h) => h.trim(),
   });
 
   const parseErrors = parsed.errors
     // Papa reports a delimiter guess as an "error" on single-column files; it is not fatal.
     .filter((e) => e.code !== 'UndetectableDelimiter')
     .slice(0, 25)
-    .map((e) => (e.row === undefined ? e.message : `Row ${e.row + 2}: ${e.message}`));
+    .map((e) => (e.row === undefined ? e.message : `Row ${e.row + 1}: ${e.message}`));
 
-  const headers = (parsed.meta.fields ?? []).filter((h) => h.trim().length > 0);
-  const { mapping, unmatchedHeaders } = mapColumns(headers);
+  const rawRows = parsed.data.map((cells) =>
+    (Array.isArray(cells) ? cells : []).map((c) => (c ?? '').toString().trim()),
+  );
+
+  const { headerIndex, headerless } = chooseHeaderRow(rawRows);
+  const columnCount = rawRows.reduce((max, r) => Math.max(max, r.length), 0);
+
+  const headers = headerless
+    ? Array.from({ length: columnCount }, (_, i) => `column_${i + 1}`)
+    : (rawRows[headerIndex] ?? []).map((h, i) => h.replace(/^﻿/, '') || `column_${i + 1}`);
+
+  const dataRows = headerless ? rawRows : rawRows.slice(headerIndex + 1);
+
+  /** The file row number a data row came from, counting non-empty rows. */
+  const fileRowOf = (dataIndex: number) =>
+    headerless ? dataIndex + 1 : headerIndex + dataIndex + 2;
+
+  const records: Record<string, string>[] = dataRows.map((cells) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, i) => {
+      record[header] = cells[i] ?? '';
+    });
+    return record;
+  });
+
+  const usableHeaders = headers.filter((h) => h.trim().length > 0);
+  const { mapping, unmatchedHeaders } = mapColumns(usableHeaders);
+
+  const detection: DetectionNotes = {
+    headerRow: headerless ? 0 : headerIndex + 1,
+    skippedLeadingRows: headerless ? 0 : headerIndex,
+    headerless,
+    urlColumnFoundByContent: null,
+  };
+
+  // Header names did not identify the URL column, so look at the values.
+  if (!mapping.linkedinUrl) {
+    const byContent = findUrlColumnByContent(usableHeaders, records);
+    if (byContent) {
+      mapping.linkedinUrl = byContent;
+      detection.urlColumnFoundByContent = byContent;
+      const ignoredAt = unmatchedHeaders.indexOf(byContent);
+      if (ignoredAt >= 0) unmatchedHeaders.splice(ignoredAt, 1);
+    }
+  }
 
   const analysis: CsvAnalysis = {
-    headers,
+    headers: usableHeaders,
+    detection,
     mapping,
     unmatchedHeaders,
-    totalRows: parsed.data.length,
+    totalRows: records.length,
     prepared: [],
     rejected: [],
     duplicatesInFile: [],
@@ -187,11 +346,15 @@ export function analyzeLeadCsv(csvText: string): CsvAnalysis {
   };
 
   if (!mapping.linkedinUrl) {
+    const seenHeaders = usableHeaders.length > 0 ? usableHeaders.join(', ') : '(none)';
     analysis.rejected.push({
-      rowNumber: 1,
+      rowNumber: Math.max(detection.headerRow, 1),
       reason: 'NO_URL_COLUMN',
       message:
-        'No LinkedIn URL column found. Expected a header such as "linkedinUrl", "Profile URL" or "LinkedIn".',
+        'No LinkedIn profile URL found in this file. Column headers were searched for names ' +
+        'such as "linkedinUrl", "Profile URL" or "LinkedIn", and every column was then checked ' +
+        `for profile URLs in its values. Columns seen: ${seenHeaders}. ` +
+        'Re-export the list with the profile URL included - a lead cannot be identified without it.',
       rawUrl: '',
       rawName: '',
     });
@@ -199,11 +362,11 @@ export function analyzeLeadCsv(csvText: string): CsvAnalysis {
   }
 
   const seen = new Map<string, number>();
-  const rowLimit = Math.min(parsed.data.length, MAX_IMPORT_ROWS);
+  const rowLimit = Math.min(records.length, MAX_IMPORT_ROWS);
 
   for (let i = 0; i < rowLimit; i += 1) {
-    const row = parsed.data[i]!;
-    const rowNumber = i + 2; // +1 for zero-index, +1 for the header row
+    const row = records[i]!;
+    const rowNumber = fileRowOf(i);
 
     const rawUrl = firstNonEmpty(row[mapping.linkedinUrl]);
     const rawFull = mapping.fullName ? firstNonEmpty(row[mapping.fullName]) : '';
@@ -278,9 +441,9 @@ export function analyzeLeadCsv(csvText: string): CsvAnalysis {
     });
   }
 
-  if (parsed.data.length > MAX_IMPORT_ROWS) {
+  if (records.length > MAX_IMPORT_ROWS) {
     analysis.parseErrors.push(
-      `File has ${parsed.data.length} rows; only the first ${MAX_IMPORT_ROWS} were analysed. Split the file and import in batches.`,
+      `File has ${records.length} rows; only the first ${MAX_IMPORT_ROWS} were analysed. Split the file and import in batches.`,
     );
   }
 

@@ -210,6 +210,38 @@ export function LeadImportWizard({
                 </p>
               ) : null}
 
+              {/* Anything guessed about the file's shape is stated here rather
+                  than applied quietly. */}
+              {preview.detection.skippedLeadingRows > 0 ||
+              preview.detection.headerless ||
+              preview.detection.urlColumnFoundByContent ? (
+                <Callout tone="warning" title="How this file was read">
+                  <ul className="list-disc pl-5">
+                    {preview.detection.skippedLeadingRows > 0 ? (
+                      <li>
+                        Skipped {preview.detection.skippedLeadingRows} row
+                        {preview.detection.skippedLeadingRows === 1 ? '' : 's'} above the header;
+                        row {preview.detection.headerRow} was used as the header.
+                      </li>
+                    ) : null}
+                    {preview.detection.headerless ? (
+                      <li>
+                        No header row found, so every row was treated as data and columns were
+                        named <code>column_1</code>, <code>column_2</code>, and so on.
+                      </li>
+                    ) : null}
+                    {preview.detection.urlColumnFoundByContent ? (
+                      <li>
+                        No column was named like a profile URL, so &ldquo;
+                        {preview.detection.urlColumnFoundByContent}&rdquo; was used because its
+                        values are LinkedIn profile URLs.
+                      </li>
+                    ) : null}
+                  </ul>
+                  Check the sample below before importing.
+                </Callout>
+              ) : null}
+
               {summary.willImport === 0 ? (
                 <Callout tone="warning" title="Nothing to import">
                   Every row is either invalid, a duplicate within the file, or already in the
