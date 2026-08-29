@@ -39,3 +39,6 @@ test-results/
 
 # vercel cli
 .vercel
+
+# lead lists - personal data, never commit
+*.csv
