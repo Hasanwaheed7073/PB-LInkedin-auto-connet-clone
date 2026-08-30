@@ -1,0 +1,348 @@
+{
+  "name": "clinical-research-us",
+  "description": "US clinical research professionals - CRC, CRA, CTA, clinical scientist, clinical operations, regulatory - plus healthcare professionals with credible evidence of moving into clinical research. Entry and early-career score well here, deliberately: they are the people a training-and-placement offer is for.",
+  "hotAt": 70,
+  "warmAt": 50,
+  "coolAt": 30,
+  "rules": [
+    {
+      "label": "recruiter or staffing, sells to this market rather than buys",
+      "match": [
+        "recruiter",
+        "talent acquisition",
+        "staffing",
+        "headhunter",
+        "recruitment consultant",
+        "sourcing specialist"
+      ],
+      "points": 0,
+      "disqualifies": true
+    },
+    {
+      "label": "vendor selling into clinical research, not working in it",
+      "match": [
+        "account executive",
+        "sales director",
+        "business development",
+        "sales manager",
+        "partnerships manager",
+        "customer success"
+      ],
+      "points": 0,
+      "disqualifies": true
+    },
+    {
+      "label": "principal investigator or attending physician, not the audience",
+      "match": [
+        "principal investigator",
+        "attending physician",
+        "chief medical officer",
+        "md, phd",
+        "physician"
+      ],
+      "points": 0,
+      "disqualifies": true,
+      "exclude": [
+        "coordinator",
+        "assistant",
+        "aspiring",
+        "transitioning"
+      ]
+    },
+    {
+      "label": "clearly outside the United States",
+      "match": [
+        "india",
+        "pakistan",
+        "bangladesh",
+        "nigeria",
+        "kenya",
+        "egypt",
+        "united kingdom",
+        "england",
+        "germany",
+        "france",
+        "spain",
+        "italy",
+        "poland",
+        "romania",
+        "ukraine",
+        "russia",
+        "china",
+        "japan",
+        "philippines",
+        "indonesia",
+        "brazil",
+        "argentina",
+        "mexico",
+        "australia",
+        "new zealand",
+        "canada",
+        "toronto",
+        "london",
+        "dublin",
+        "singapore",
+        "dubai",
+        "united arab emirates",
+        "saudi arabia",
+        "south africa"
+      ],
+      "points": 0,
+      "disqualifies": true,
+      "fields": [
+        "location",
+        "extra"
+      ]
+    },
+    {
+      "label": "United States",
+      "match": [
+        "united states",
+        "usa",
+        "u.s.",
+        "america",
+        "alabama",
+        "alaska",
+        "arizona",
+        "arkansas",
+        "california",
+        "colorado",
+        "connecticut",
+        "delaware",
+        "florida",
+        "georgia",
+        "hawaii",
+        "idaho",
+        "illinois",
+        "indiana",
+        "iowa",
+        "kansas",
+        "kentucky",
+        "louisiana",
+        "maine",
+        "maryland",
+        "massachusetts",
+        "michigan",
+        "minnesota",
+        "mississippi",
+        "missouri",
+        "montana",
+        "nebraska",
+        "nevada",
+        "new hampshire",
+        "new jersey",
+        "new mexico",
+        "new york",
+        "north carolina",
+        "north dakota",
+        "ohio",
+        "oklahoma",
+        "oregon",
+        "pennsylvania",
+        "rhode island",
+        "south carolina",
+        "south dakota",
+        "tennessee",
+        "texas",
+        "utah",
+        "vermont",
+        "virginia",
+        "washington",
+        "west virginia",
+        "wisconsin",
+        "wyoming",
+        "boston",
+        "chicago",
+        "houston",
+        "atlanta",
+        "philadelphia",
+        "phoenix",
+        "denver",
+        "seattle",
+        "san diego",
+        "dallas",
+        "raleigh",
+        "durham",
+        "minneapolis",
+        "san francisco"
+      ],
+      "points": 15,
+      "fields": [
+        "location",
+        "extra"
+      ]
+    },
+    {
+      "label": "core clinical research role",
+      "match": [
+        "clinical research coordinator",
+        "research coordinator",
+        "study coordinator",
+        "clinical research associate",
+        "clinical trial assistant",
+        "clinical trials assistant",
+        "clinical research assistant",
+        "clinical research nurse",
+        "research nurse",
+        "crc",
+        "cra",
+        "cta",
+        "clinical scientist",
+        "clinical trial manager",
+        "clinical project manager",
+        "clinical operations",
+        "clinical research specialist",
+        "site manager",
+        "study start-up"
+      ],
+      "points": 40
+    },
+    {
+      "label": "regulatory or quality in clinical research",
+      "match": [
+        "regulatory affairs",
+        "regulatory specialist",
+        "regulatory coordinator",
+        "regulatory associate",
+        "irb coordinator",
+        "irb specialist",
+        "quality assurance",
+        "gcp auditor",
+        "compliance specialist"
+      ],
+      "points": 38
+    },
+    {
+      "label": "adjacent clinical trial function",
+      "match": [
+        "clinical data manager",
+        "data management",
+        "pharmacovigilance",
+        "drug safety",
+        "biostatistics",
+        "medical writer",
+        "medical writing",
+        "clinical supply"
+      ],
+      "points": 22
+    },
+    {
+      "label": "healthcare professional who could move into research",
+      "match": [
+        "registered nurse",
+        " rn",
+        "bsn",
+        "lpn",
+        "medical assistant",
+        "phlebotomist",
+        "pharmacy technician",
+        "laboratory technician",
+        "lab technician",
+        "medical technologist",
+        "patient care technician",
+        "cna",
+        "emt",
+        "paramedic",
+        "medical scribe",
+        "radiologic technologist",
+        "respiratory therapist",
+        "physical therapist"
+      ],
+      "points": 20
+    },
+    {
+      "label": "stated intent to move into clinical research",
+      "match": [
+        "transitioning into clinical research",
+        "transitioning to clinical research",
+        "aspiring clinical research",
+        "aspiring crc",
+        "breaking into clinical research",
+        "pivoting into clinical research",
+        "new to clinical research",
+        "seeking clinical research",
+        "clinical research certificate",
+        "clinical research student"
+      ],
+      "points": 35
+    },
+    {
+      "label": "clinical research credential or training",
+      "match": [
+        "acrp",
+        "socra",
+        "ccrp",
+        "ccrc",
+        "ccra",
+        "gcp certified",
+        "ich-gcp",
+        "ich gcp",
+        "citi program"
+      ],
+      "points": 18
+    },
+    {
+      "label": "employer is a site, sponsor or CRO",
+      "match": [
+        "clinical research site",
+        "research institute",
+        "medical center",
+        "health system",
+        "university hospital",
+        "cancer center",
+        "cro",
+        "contract research organization",
+        "pharmaceutical",
+        "biotech",
+        "biopharmaceutical"
+      ],
+      "points": 12,
+      "fields": [
+        "company",
+        "extra"
+      ]
+    },
+    {
+      "label": "entry or early career, which is who the offer is for",
+      "match": [
+        "entry level",
+        "entry-level",
+        "aspiring",
+        "recent graduate",
+        "new grad",
+        "junior",
+        "assistant",
+        "coordinator i",
+        "seeking first"
+      ],
+      "points": 14
+    },
+    {
+      "label": "senior leadership, less likely to buy training or placement",
+      "match": [
+        "vice president",
+        "vp of",
+        "executive director",
+        "head of clinical",
+        "senior director",
+        "chief"
+      ],
+      "points": -25
+    },
+    {
+      "label": "actively searching",
+      "match": [
+        "open to work",
+        "opentowork",
+        "actively seeking",
+        "actively looking",
+        "seeking opportunities",
+        "looking for my next",
+        "available immediately",
+        "laid off",
+        "recently laid off"
+      ],
+      "points": 25
+    }
+  ]
+}
