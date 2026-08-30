@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { byCampaignScope, campaignScope } from '@/lib/business-profile';
 import { prisma } from '@/lib/db';
 import { getQueueCounts } from '@/lib/queue';
 import { formatNumber, formatRelativeTime, formatTimestamp, humanizeEnum } from '@/lib/utils';
@@ -50,7 +51,10 @@ export default async function QueuePage({
   const parsed = queueFilterSchema.safeParse(raw);
   const filter = parsed.success ? parsed.data : queueFilterSchema.parse({});
 
+  const scope = await byCampaignScope();
+
   const where = {
+    ...scope,
     ...(filter.status ? { status: filter.status } : {}),
     ...(filter.campaignId ? { campaignId: filter.campaignId } : {}),
     ...(filter.q
@@ -59,7 +63,7 @@ export default async function QueuePage({
   };
 
   const [counts, total, jobs, campaigns] = await Promise.all([
-    getQueueCounts(filter.campaignId ? { campaignId: filter.campaignId } : {}),
+    getQueueCounts(filter.campaignId ? { campaignId: filter.campaignId } : scope),
     prisma.queueJob.count({ where }),
     prisma.queueJob.findMany({
       where,
@@ -72,7 +76,11 @@ export default async function QueuePage({
         claimedBy: { select: { id: true, name: true } },
       },
     }),
-    prisma.campaign.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.campaign.findMany({
+      where: await campaignScope(),
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / filter.pageSize));

@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { byCampaignScope, campaignScope } from '@/lib/business-profile';
 import { prisma } from '@/lib/db';
 import { formatNumber, formatRelativeTime, truncate } from '@/lib/utils';
 import { leadFilterSchema } from '@/lib/validation/schemas';
@@ -38,7 +39,12 @@ export default async function LeadsPage({
   const parsed = leadFilterSchema.safeParse(raw);
   const filter = parsed.success ? parsed.data : leadFilterSchema.parse({});
 
+  // Scoped to the business being worked on. Without this the healthcare view
+  // shows the reverse-recruiting leads, which is what it did.
+  const scope = await byCampaignScope();
+
   const where = {
+    ...scope,
     ...(filter.status ? { status: filter.status } : {}),
     ...(filter.campaignId ? { campaignId: filter.campaignId } : {}),
     ...(filter.q
@@ -62,8 +68,12 @@ export default async function LeadsPage({
       take: filter.pageSize,
       include: { campaign: { select: { id: true, name: true } } },
     }),
-    prisma.campaign.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.lead.groupBy({ by: ['status'], _count: { _all: true } }),
+    prisma.campaign.findMany({
+      where: await campaignScope(),
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.lead.groupBy({ by: ['status'], _count: { _all: true }, where: scope }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / filter.pageSize));

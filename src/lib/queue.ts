@@ -1279,10 +1279,18 @@ export interface QueueCounts {
 }
 
 export async function getQueueCounts(
-  filter: { campaignId?: string } = {},
+  /**
+   * Either a single campaign, or any queue-job where-fragment - which is how
+   * the business scope, `{ campaign: { businessProfileId } }`, reaches these
+   * counters so the tiles agree with the table beneath them.
+   */
+  filter: { campaignId?: string } | Prisma.QueueJobWhereInput = {},
   client: DbClient = prisma,
 ): Promise<QueueCounts> {
-  const where = filter.campaignId ? { campaignId: filter.campaignId } : {};
+  const where: Prisma.QueueJobWhereInput =
+    'campaignId' in filter && typeof filter.campaignId === 'string'
+      ? { campaignId: filter.campaignId }
+      : (filter as Prisma.QueueJobWhereInput);
   const grouped = await client.queueJob.groupBy({
     by: ['status'],
     where,

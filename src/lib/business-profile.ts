@@ -94,3 +94,35 @@ export async function campaignScope(): Promise<{ businessProfileId?: string }> {
   const active = await activeBusinessProfile();
   return active ? { businessProfileId: active.id } : {};
 }
+
+/**
+ * Scope for anything hanging off a campaign - leads, queue jobs, activity.
+ *
+ * Reached through the campaign relation because that is where the business
+ * lives. A row with no campaign at all is excluded while a business is
+ * selected: it belongs to no book of business, so showing it under one would
+ * be a guess.
+ */
+export async function byCampaignScope(): Promise<
+  { campaign?: { businessProfileId: string } } | Record<string, never>
+> {
+  const active = await activeBusinessProfile();
+  return active ? { campaign: { businessProfileId: active.id } } : {};
+}
+
+/**
+ * Scope for incidents.
+ *
+ * Deliberately different: an incident with no campaign is a worker- or
+ * account-level problem - an expired session, a CAPTCHA, a restriction - and it
+ * halts every business at once. Hiding those behind a business filter would let
+ * the thing that has stopped all work be invisible from the business you happen
+ * to be looking at.
+ */
+export async function incidentScope(): Promise<Record<string, unknown>> {
+  const active = await activeBusinessProfile();
+  if (!active) return {};
+  return {
+    OR: [{ campaignId: null }, { campaign: { businessProfileId: active.id } }],
+  };
+}

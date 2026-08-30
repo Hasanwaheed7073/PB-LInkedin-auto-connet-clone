@@ -6,6 +6,7 @@ import { IncidentCard } from '@/components/incident-card';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Callout, EmptyState } from '@/components/ui/misc';
+import { incidentScope } from '@/lib/business-profile';
 import { prisma } from '@/lib/db';
 import { getSystemState } from '@/lib/safety';
 import { formatNumber } from '@/lib/utils';
@@ -30,7 +31,7 @@ export default async function IncidentsPage({
 
   const [open, resolved, system, blockingCount] = await Promise.all([
     prisma.incident.findMany({
-      where: { status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
+      where: { ...(await incidentScope()), status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
       orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
       include: {
         lead: { select: { id: true, fullName: true, linkedinUrl: true, status: true } },
@@ -41,7 +42,7 @@ export default async function IncidentsPage({
     }),
     includeResolved
       ? prisma.incident.findMany({
-          where: { status: 'RESOLVED' },
+          where: { ...(await incidentScope()), status: 'RESOLVED' },
           orderBy: { resolvedAt: 'desc' },
           take: 50,
           include: {
