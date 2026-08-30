@@ -7,6 +7,7 @@ import type {
 } from '@prisma/client';
 
 import { logActivity, type DbClient } from './activity';
+import { notify } from './notify';
 import { prisma } from './db';
 import { SYSTEM_STATE_ID } from './safety';
 
@@ -64,7 +65,7 @@ const DEDUPLICATED_TYPES: readonly IncidentType[] = [
 export async function openIncident(input: OpenIncidentInput): Promise<OpenIncidentResult> {
   const blocksWorker = input.blocksWorker ?? true;
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     if (DEDUPLICATED_TYPES.includes(input.type)) {
       const existing = await tx.incident.findFirst({
         where: { type: input.type, status: { in: ['OPEN', 'ACKNOWLEDGED'] } },
@@ -155,6 +156,48 @@ export async function openIncident(input: OpenIncidentInput): Promise<OpenIncide
     const killSwitchEngaged = await maybeEngageKillSwitch(tx, input, incident.id);
     return { incidentId: incident.id, deduplicated: false, killSwitchEngaged };
   });
+
+  // Alert after the transaction commits, never inside it: a webhook is slow and
+  // remote, and holding a database transaction open across it would be a bug in
+  // its own right. Deduplicated incidents do not re-alert - one CAPTCHA wall
+  // should not page the operator fifty times.
+  if (!result.deduplicated) {
+    void alertForIncident(input, result);
+  }
+
+  return result;
+}
+
+/**
+ * Fire-and-forget operator alert. Deliberately not awaited by the caller and
+ * incapable of throwing: this sits on the failure path, and an alerting problem
+ * must never become an incident-reporting problem.
+ */
+async function alertForIncident(
+  input: OpenIncidentInput,
+  result: OpenIncidentResult,
+): Promise<void> {
+  try {
+    const blocksWorker = input.blocksWorker ?? true;
+    const outcome = await notify({
+      severity: blocksWorker ? 'critical' : 'warning',
+      title: blocksWorker ? `Automation halted: ${input.title}` : `Incident: ${input.title}`,
+      detail: input.description.slice(0, 600),
+      fields: {
+        Type: input.type,
+        'Page state': input.pageState ?? undefined,
+        'Blocks worker': blocksWorker ? 'yes' : 'no',
+        'Emergency stop': result.killSwitchEngaged ? 'ENGAGED' : 'not engaged',
+      },
+    });
+
+    if (outcome.attempted && !outcome.delivered) {
+      // Worth a log line: a silent alerting failure is the same as no alerting.
+      console.warn(`[notify] alert not delivered: ${outcome.reason}`);
+    }
+  } catch (error) {
+    console.warn(`[notify] alerting threw: ${error instanceof Error ? error.message : error}`);
+  }
 }
 
 async function maybeEngageKillSwitch(

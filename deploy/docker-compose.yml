@@ -1,0 +1,67 @@
+# Worker on a server.
+#
+#   docker compose --profile login up      # one-time: sign in to LinkedIn
+#   docker compose up -d worker            # thereafter: runs unattended
+#
+# Two services share one volume. `login` gives you a real browser window in a
+# web page so you can sign in on the server itself; `worker` runs headless and
+# reuses the session that login saved.
+#
+# Signing in ON the server matters. Copying a profile up from a laptop means a
+# session created on a home connection is replayed from a datacenter, which is
+# exactly the pattern that triggers a verification challenge.
+
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      WORKER_HEADLESS: "true"
+      # Points at the deployed dashboard. The worker holds no database
+      # credentials; everything goes through the authenticated API.
+      WORKER_API_BASE_URL: ${WORKER_API_BASE_URL}
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN}
+      WORKER_NAME: server-worker-1
+      # Set these to be told when automation halts. Without them a worker that
+      # stops at 03:00 stays stopped until somebody happens to look.
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      DASHBOARD_BASE_URL: ${WORKER_API_BASE_URL}
+    volumes:
+      - browser-profile:/data
+    # A browser rendering pages from the open internet. Keep it boxed in.
+    security_opt:
+      - no-new-privileges:true
+    # Chromium needs more than the 64MB default or tabs die in ways that look
+    # like site errors.
+    shm_size: 1gb
+    mem_limit: 2g
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # One-time, interactive. Started only with `--profile login`, so it cannot be
+  # left running by accident: it exposes a remote desktop.
+  login:
+    profiles: [login]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.login
+    env_file: ../.env
+    environment:
+      WORKER_API_BASE_URL: ${WORKER_API_BASE_URL}
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN}
+    volumes:
+      - browser-profile:/data
+    ports:
+      # Bound to localhost deliberately. Reach it with an SSH tunnel:
+      #   ssh -L 7900:localhost:7900 you@server
+      # then open http://localhost:7900. Publishing a remote desktop to the
+      # internet would hand anyone who finds it your signed-in LinkedIn.
+      - "127.0.0.1:7900:7900"
+    shm_size: 1gb
+
+volumes:
+  browser-profile:
