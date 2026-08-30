@@ -114,7 +114,23 @@ describe('nothing is sent when there is nothing to send', () => {
 
     expect(outcome.kind).toBe('UNPROCESSABLE');
     if (outcome.kind !== 'UNPROCESSABLE') return;
-    expect(outcome.reason).toContain('no connect action');
+    // The fixture carries a "People also viewed" sidebar with Connect buttons
+    // for other people. Refusing here - while those remain unclicked - is the
+    // whole point: the owner has no Connect, so there is nothing to do.
+    expect(outcome.reason).toMatch(/no connect action/i);
+    expect(outcome.state).toBe('PROFILE_FOUND');
+  });
+
+  it('never clicks a Connect button belonging to someone else on the page', async () => {
+    // Regression guard for a bug that reached production: the sidebar's
+    // stranger Connect is a <button> while the owner's own control is not, so
+    // "click the first Connect button" invited the wrong person.
+    const outcome = await performConnect(params('no-affordance'));
+
+    expect(outcome.kind).toBe('UNPROCESSABLE');
+    if (outcome.kind !== 'UNPROCESSABLE') return;
+    expect(outcome.reason).not.toContain('Hamza');
+    expect(outcome.reason).not.toContain('Puneet');
   });
 });
 

@@ -137,8 +137,21 @@ const SELECTORS = {
     'img.global-nav__me-photo',
     'button[data-control-name="identity_welcome_message"]',
   ],
-  /** Anchor proving a profile top card rendered. */
+  /**
+   * Anchor proving a profile top card rendered.
+   *
+   * The four legacy entries below match nothing on the current site - profile
+   * pages no longer contain an `h1` at all - so the first three carry this now.
+   * `data-view-name` is LinkedIn's own instrumentation vocabulary: it names what
+   * a thing *is* rather than how it looks, which is what the hashed class names
+   * destroyed. The Follow control is the fallback, since a profile always
+   * offers some relationship action.
+   */
   profileTopCard: [
+    '[data-view-name="profile-overflow-button"]',
+    '[data-view-name="profile-primary-message"]',
+    '[data-view-name="profile-card-recent-activity"]',
+    'main button[aria-label^="Follow "]',
     'section.artdeco-card div.ph5',
     'main section:first-of-type h1',
     '.pv-top-card',
@@ -316,7 +329,11 @@ export async function detectPageState(
   const topCard = await anyVisible(page, SELECTORS.profileTopCard);
 
   if (onProfileUrl && topCard.found) {
-    const connection = await detectConnectionState(page);
+    // Scope the connection question to whoever this profile belongs to.
+    // Unscoped, the "People also viewed" sidebar makes every profile look
+    // CONNECT_AVAILABLE, including ones where the owner offers no Connect at
+    // all - and makes a sent invitation look unsent.
+    const connection = await detectConnectionState(page, ownerFromTitle(title));
     return {
       ...base,
       state: connection.state,
@@ -368,7 +385,101 @@ export interface ConnectionDetection {
  *  4. Anything else is `PROFILE_FOUND`, which the CONNECT action escalates for
  *     review rather than acting on.
  */
-export async function detectConnectionState(page: Page): Promise<ConnectionDetection> {
+/**
+ * Selectors scoped to one named person.
+ *
+ * Verification has the same hazard as clicking: a profile page carries a
+ * "People also viewed" sidebar whose entries each have their own Connect
+ * button. Scanning the whole page for "a Connect button" therefore finds one on
+ * every profile, whatever happened to the invitation - so a successful send
+ * reads as a failure, and the invitation goes out while the database records
+ * nothing. Four real invitations were sent that way before this was caught.
+ *
+ * When the owner's name is known, both questions are asked about them
+ * specifically: is *their* invitation pending, is *their* Connect still offered.
+ */
+/**
+ * The name of the person whose profile this is, read from the document title
+ * ("Ada Lovelace | LinkedIn").
+ *
+ * The title is the one part of a profile page that has survived every redesign
+ * so far - the markup around it now uses hashed class names that change with
+ * each build - which is what makes owner-scoped selectors possible at all.
+ */
+export function ownerFromTitle(title: string): string | null {
+  // Strips the site suffix after the last separator, without touching hyphens
+  // inside the name itself.
+  const name = title.replace(/\s*[|\-–]\s*[^|]*LinkedIn\s*$/i, '').trim();
+  if (name.length === 0 || name.length > 120) return null;
+  if (/linkedin/i.test(name)) return null;
+  return name;
+}
+
+function ownerScoped(owner: string): { pending: string[]; connect: string[] } {
+  const escaped = owner.replace(/["\\]/g, '\\$&');
+  return {
+    pending: [
+      `[aria-label="Withdraw invitation sent to ${escaped}"]`,
+      `[aria-label*="Withdraw invitation" i][aria-label*="${escaped}" i]`,
+      `[aria-label*="Pending" i][aria-label*="${escaped}" i]`,
+    ],
+    connect: [`[aria-label="Invite ${escaped} to connect"]`],
+  };
+}
+
+export async function detectConnectionState(
+  page: Page,
+  /**
+   * The profile owner's name. Without it this falls back to page-wide
+   * selectors, which cannot distinguish the owner from a sidebar suggestion.
+   */
+  owner?: string | null,
+): Promise<ConnectionDetection> {
+  if (owner) {
+    const scoped = ownerScoped(owner);
+
+    const ownerPending = await anyVisible(page, scoped.pending);
+    if (ownerPending.found) {
+      return {
+        state: 'INVITATION_PENDING',
+        matchedBy: `dom:${ownerPending.selector}`,
+        detail: { signal: 'pending-for-owner', owner },
+      };
+    }
+
+    const ownerConnect = await anyVisible(page, scoped.connect);
+    if (ownerConnect.found) {
+      return {
+        state: 'CONNECT_AVAILABLE',
+        matchedBy: `dom:${ownerConnect.selector}`,
+        detail: { signal: 'connect-for-owner', owner },
+      };
+    }
+
+    // Neither control is offered for this person. The remaining checks below
+    // are page-wide, so the pending and connect ones are skipped entirely: a
+    // match there would necessarily belong to somebody else on the page. Only
+    // the first-degree badge and the messaging affordance, which are properties
+    // of the top card rather than the sidebar, are still worth asking about.
+    const ownerDegree = await anyVisible(page, CONNECTION_SELECTORS.firstDegree);
+    if (ownerDegree.found) {
+      return {
+        state: 'ALREADY_CONNECTED',
+        matchedBy: `dom:${ownerDegree.selector}`,
+        detail: { signal: 'first-degree-badge', owner },
+      };
+    }
+
+    const ownerMessage = await anyVisible(page, CONNECTION_SELECTORS.message);
+    return {
+      state: 'PROFILE_FOUND',
+      matchedBy: ownerMessage.found
+        ? `dom:${ownerMessage.selector}`
+        : 'profile rendered; no connection affordance for this person',
+      detail: { signal: 'no-affordance-for-owner', owner, messageFound: ownerMessage.found },
+    };
+  }
+
   const pending = await anyVisible(page, CONNECTION_SELECTORS.pending);
   if (pending.found) {
     return {

@@ -5,7 +5,7 @@ import type { PageState } from '@prisma/client';
 import { profileNavigationUrl } from '../../lib/linkedin-url';
 import { isNavigationTimeout } from '../browser';
 import type { Logger } from '../logger';
-import { detectConnectionState, detectPageState } from '../page-state';
+import { detectConnectionState, detectPageState, ownerFromTitle } from '../page-state';
 
 /**
  * The CONNECT action.
@@ -82,6 +82,13 @@ const DIALOG = {
   ],
   noteField: ['textarea#custom-message', 'textarea[name="message"]', 'textarea.send-invite__custom-message'],
   send: [
+    // "Send without a note" first, and explicitly. A free LinkedIn account has
+    // a small monthly allowance of personalised invitations; once it is spent
+    // the dialog offers this instead. Relying on the loose `has-text("Send")`
+    // below to catch it would be luck, since that also matches "Send with a
+    // note" if LinkedIn ever renders both.
+    'button[aria-label*="Send without a note" i]',
+    'button:has-text("Send without a note")',
     'button[aria-label="Send invitation"]',
     'button[aria-label="Send now"]',
     'button[aria-label*="Send invitation" i]',
@@ -115,6 +122,86 @@ async function clickFirstVisible(
       // Try the next candidate.
     }
   }
+  return null;
+}
+
+/**
+ * The name of the person whose profile this is, taken from the document title
+ * ("Ada Lovelace | LinkedIn"). The title is the one part of the page that has
+ * survived every redesign so far, and it is what makes the check below possible.
+ */
+export const profileOwnerFromTitle = ownerFromTitle;
+
+/**
+ * Find the Connect control **belonging to this profile's owner**.
+ *
+ * This is the most safety-critical selector in the project, and the reason it
+ * cannot simply look for a Connect button: a profile page carries a "People
+ * also viewed" sidebar, and every entry in it has its own Connect button. On a
+ * real profile visited during testing, the *only* top-level Connect button on
+ * the page belonged to a stranger in that sidebar - the owner's own Connect sat
+ * inside the "More" overflow. Clicking "the first Connect button" would have
+ * invited the wrong person, silently and unrecoverably.
+ *
+ * So the button is identified by what its label says it will do. LinkedIn
+ * renders `aria-label="Invite <full name> to connect"`, and we require that
+ * name to be the profile owner's. A button that does not name them is not
+ * clicked, whatever it says on its face.
+ */
+async function findOwnerConnectButton(
+  page: Page,
+  owner: string,
+  logger: Logger,
+): Promise<{ selector: string; opened: boolean } | null> {
+  // Deliberately NOT scoped to <button>. On current profiles the owner's own
+  // Connect renders as a <div>, while the sidebar stranger's renders as a
+  // <button> - so scoping by tag finds exactly the wrong element.
+  // Names legitimately contain quotes and backslashes; both would break out of
+  // the attribute selector and match something unintended.
+  const escaped = owner.replace(/["\\]/g, '\\$&');
+  const exact = `[aria-label="Invite ${escaped} to connect"]`;
+
+  const visible = async (selector: string): Promise<boolean> => {
+    try {
+      await page.locator(selector).first().waitFor({ state: 'visible', timeout: 2_500 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await visible(exact)) return { selector: exact, opened: false };
+
+  // Not on the surface. On current layouts the owner's Connect is inside the
+  // profile card's overflow menu, alongside "Save to PDF" and "Report / Block".
+  const mores = page.locator('main').locator('button[aria-label="More"]');
+  const count = await mores.count();
+
+  for (let i = 0; i < count; i += 1) {
+    const button = mores.nth(i);
+    const box = await button.boundingBox();
+    // The sticky header carries its own "More" that sits under the nav bar and
+    // cannot be clicked; skip anything at the very top of the viewport.
+    if (!box || box.y < 80) continue;
+
+    try {
+      await button.scrollIntoViewIfNeeded();
+      await button.click({ timeout: 6_000 });
+      await page.waitForTimeout(1_200);
+    } catch {
+      continue;
+    }
+
+    if (await visible(exact)) {
+      logger.debug('Owner connect found in the profile overflow menu', { owner });
+      return { selector: exact, opened: true };
+    }
+
+    // Wrong menu - close it before trying the next candidate.
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+
   return null;
 }
 
@@ -199,17 +286,31 @@ export async function performConnect(params: ConnectParams): Promise<ConnectOutc
   // --- 3. Act -------------------------------------------------------------
   throwIfAborted(signal);
 
-  const connectSelector = await clickFirstVisible(page, [
-    'button[aria-label^="Invite" i][aria-label*="connect" i]',
-    'button[aria-label*="to connect" i]',
-    'button.artdeco-button--primary:has-text("Connect")',
-    'button:has-text("Connect")',
-  ]);
-
-  if (!connectSelector) {
+  const owner = profileOwnerFromTitle(await page.title());
+  if (!owner) {
     return {
       kind: 'UNPROCESSABLE',
-      reason: 'A connect affordance was detected but could not be clicked.',
+      reason: 'Could not read whose profile this is from the page title; refusing to click.',
+      state: before.state,
+    };
+  }
+
+  const found = await findOwnerConnectButton(page, owner, logger);
+  if (!found) {
+    return {
+      kind: 'UNPROCESSABLE',
+      reason: `No Connect control naming "${owner}" was found on their own profile.`,
+      state: before.state,
+    };
+  }
+
+  const connectSelector = found.selector;
+  try {
+    await page.locator(connectSelector).first().click({ timeout: 6_000 });
+  } catch {
+    return {
+      kind: 'UNPROCESSABLE',
+      reason: 'The connect control was found but could not be clicked.',
       state: before.state,
     };
   }
@@ -335,7 +436,9 @@ async function verifyInvitationSent(
 
   const full = await detectPageState(page, { expectProfile: true });
   if (full.state === 'PROFILE_FOUND' || full.state === 'CONNECT_AVAILABLE') {
-    const connection = await detectConnectionState(page);
+    // Ask about this profile's owner, not about any Connect button on the page.
+    const owner = profileOwnerFromTitle(await page.title());
+    const connection = await detectConnectionState(page, owner);
     return { state: connection.state, matchedBy: `after reload: ${connection.matchedBy}` };
   }
   return { state: full.state, matchedBy: `after reload: ${full.matchedBy}` };

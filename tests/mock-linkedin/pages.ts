@@ -83,8 +83,35 @@ function topCard(options: {
       </div>
     </div>
   </section>
+  ${BROWSEMAP_SIDEBAR}
 </main>`;
 }
+
+/**
+ * "People also viewed", reproduced because of what it did in production.
+ *
+ * Every entry carries its own Connect button, and on the real site the
+ * stranger's button is a `<button>` while the profile owner's own control is a
+ * `<div>` tucked inside an overflow menu. Code that looked for "a Connect
+ * button" therefore found this one - the wrong person - and code that verified
+ * a send by looking for "a Connect button" found it again and concluded nothing
+ * had been sent, while four real invitations had gone out.
+ *
+ * Present in every profile fixture so neither mistake can return unnoticed: a
+ * test that clicks or reads this element is a test that would have shipped the
+ * bug.
+ */
+const BROWSEMAP_SIDEBAR = `
+<aside data-view-name="profile-browsemap">
+  <section class="artdeco-card" data-view-name="profile-browsemap-entity">
+    <span>Hamza Farooq Muhammadi</span>
+    <button class="artdeco-button" aria-label="Invite Hamza Farooq Muhammadi to connect">Connect</button>
+  </section>
+  <section class="artdeco-card" data-view-name="profile-browsemap-entity">
+    <span>Puneet Gupta</span>
+    <button class="artdeco-button" aria-label="Invite Puneet Gupta to connect">Connect</button>
+  </section>
+</aside>`;
 
 const CONNECT_BUTTON = `<button class="artdeco-button artdeco-button--primary"
   aria-label="Invite Jane Doe to connect">Connect</button>`;
@@ -182,26 +209,26 @@ export const FIXTURES: Record<FixtureName, string> = {
 
   // --- Profile connection states -----------------------------------------
   'profile-connect-available': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       topCard({ name: 'Jane Doe', degree: '2nd', buttons: `${CONNECT_BUTTON}${MESSAGE_BUTTON}` }),
   ),
 
   'profile-already-connected': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       topCard({ name: 'Jane Doe', degree: '1st', buttons: `${MESSAGE_BUTTON}${FOLLOW_BUTTON}` }),
   ),
 
   'profile-invitation-pending': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       topCard({ name: 'Jane Doe', degree: '2nd', buttons: `${PENDING_BUTTON}${MESSAGE_BUTTON}` }),
   ),
 
   // Loaded, but nothing actionable - must NOT be treated as safe to send.
   'profile-no-affordance': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV + topCard({ name: 'Jane Doe', degree: null, buttons: FOLLOW_BUTTON }),
   ),
 
@@ -213,7 +240,7 @@ export const FIXTURES: Record<FixtureName, string> = {
 
   // --- Interactive connect flows -----------------------------------------
   'profile-connect-then-pending': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       `<main class="scaffold-layout__main">
         <section class="artdeco-card pv-top-card" data-member-id="12345">
@@ -233,7 +260,7 @@ export const FIXTURES: Record<FixtureName, string> = {
   ),
 
   'profile-connect-email-required': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       `<main class="scaffold-layout__main">
         <section class="artdeco-card pv-top-card" data-member-id="12345">
@@ -252,7 +279,7 @@ export const FIXTURES: Record<FixtureName, string> = {
   ),
 
   'profile-connect-no-note-field': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       `<main class="scaffold-layout__main">
         <section class="artdeco-card pv-top-card" data-member-id="12345">
@@ -312,7 +339,7 @@ export const FIXTURES: Record<FixtureName, string> = {
   // A CAPTCHA container that is present in the DOM but hidden. Must NOT halt
   // the worker: a stray hidden node should not stop a whole run.
   'profile-hidden-captcha': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       topCard({ name: 'Jane Doe', degree: '2nd', buttons: CONNECT_BUTTON }) +
       `<div class="captcha-container" style="display:none">
@@ -322,7 +349,7 @@ export const FIXTURES: Record<FixtureName, string> = {
 
   // A visible CAPTCHA overlaying an otherwise normal profile. Must halt.
   'profile-captcha-overlay': shell(
-    'Jane Doe | Mock LinkedIn',
+    'Jane Doe | LinkedIn',
     GLOBAL_NAV +
       topCard({ name: 'Jane Doe', degree: '2nd', buttons: CONNECT_BUTTON }) +
       `<div class="captcha-container">
