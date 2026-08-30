@@ -222,6 +222,19 @@ export const generateQueueSchema = z.object({
   limit: z.coerce.number().int().min(1).max(5_000).optional(),
 });
 
+/**
+ * A burst: "send this many, over this long, starting now."
+ *
+ * The ceilings here are shape checks, not the safety limits - the campaign's
+ * daily limit and the global ceiling are enforced server-side against what has
+ * actually been sent today, and trim the request rather than rejecting it.
+ */
+export const scheduleBurstSchema = z.object({
+  campaignId: cuidSchema,
+  count: z.coerce.number().int().min(1).max(200),
+  minutes: z.coerce.number().int().min(1).max(720),
+});
+
 // ---------------------------------------------------------------------------
 // Queue
 // ---------------------------------------------------------------------------

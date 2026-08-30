@@ -280,6 +280,11 @@ model CampaignSettings {
   /// Halt this campaign as soon as any incident is opened against it.
   pauseOnIncident Boolean @default(true)
 
+  /// An operator-authorised burst, expiring at this time. While it is in the future the
+  /// operating window and weekday list are bypassed - the operator has just asked for these
+  /// sends now. The daily ceilings are NOT bypassed: those protect the account.
+  burstUntil DateTime?
+
   /// Skip (rather than send a broken note to) leads whose template variables cannot be
   /// resolved, so a template containing {{firstName}} can never render an empty greeting.
   skipLeadsMissingTemplateVars Boolean @default(true)

@@ -7,7 +7,7 @@ import { actionError, actionOk, validate, type ActionResult } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { serverEnv } from '@/lib/env';
-import { cancelCampaignQueue, generateQueueForCampaign } from '@/lib/queue';
+import { cancelCampaignQueue, generateQueueForCampaign, scheduleBurst } from '@/lib/queue';
 import { getSystemState } from '@/lib/safety';
 import { renderTemplate } from '@/lib/template';
 import {
@@ -16,6 +16,7 @@ import {
   campaignIdSchema,
   createCampaignSchema,
   generateQueueSchema,
+  scheduleBurstSchema,
   pauseCampaignSchema,
   updateCampaignSchema,
 } from '@/lib/validation/schemas';
@@ -569,4 +570,85 @@ export async function clearCampaignQueue(
   revalidatePath(`/campaigns/${parsed.data.id}`);
 
   return actionOk({ cancelled }, `Cancelled ${cancelled} waiting job(s).`);
+}
+
+/**
+ * Schedule a burst: send `count` invitations over the next `minutes`.
+ *
+ * The daily control an operator actually wants - "thirty over the next half
+ * hour" - without editing the campaign's standing schedule or regenerating a
+ * queue. It brings jobs forward, spreads them evenly, and authorises the worker
+ * to run outside the operating window until the burst expires.
+ *
+ * It cannot exceed a daily limit. Both ceilings are counted against what has
+ * really been sent today and the request is trimmed to fit, so the operator
+ * gets what is available with an explanation instead of a rejection.
+ */
+export async function scheduleBurstAction(
+  input: unknown,
+): Promise<
+  ActionResult<{
+    scheduled: number;
+    trimReason: string | null;
+    firstAt: string | null;
+    lastAt: string | null;
+    remainingTodayAfter: number;
+  }>
+> {
+  const user = await requireUser();
+
+  const parsed = validate(scheduleBurstSchema, input);
+  if (!parsed.ok) return parsed.result;
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: parsed.data.campaignId },
+    select: { id: true, name: true, status: true, active: true, settings: { select: { id: true } } },
+  });
+  if (!campaign) return actionError('Campaign not found.');
+  if (!campaign.settings) return actionError('This campaign has no schedule configured.');
+  if (!campaign.active || campaign.status !== 'RUNNING') {
+    return actionError(
+      'Activate the campaign first. A burst schedules work; it does not start a paused campaign.',
+    );
+  }
+
+  const result = await scheduleBurst({
+    campaignId: parsed.data.campaignId,
+    count: parsed.data.count,
+    minutes: parsed.data.minutes,
+    actorId: user.id,
+    actorName: user.name,
+  });
+
+  revalidatePath('/queue');
+  revalidatePath(`/campaigns/${parsed.data.campaignId}`);
+  revalidatePath('/');
+
+  if (result.scheduled === 0) {
+    return actionError(
+      result.trimReason === 'NOT_ENOUGH_LEADS'
+        ? 'No leads are waiting in this campaign.'
+        : "Today's limit is already used up. Nothing was scheduled.",
+    );
+  }
+
+  const explanation =
+    result.trimReason === 'CAMPAIGN_DAILY_LIMIT'
+      ? " (trimmed to the campaign's daily limit)"
+      : result.trimReason === 'GLOBAL_DAILY_LIMIT'
+        ? ' (trimmed to the global daily ceiling)'
+        : result.trimReason === 'NOT_ENOUGH_LEADS'
+          ? ' (all the leads that were waiting)'
+          : '';
+
+  return actionOk(
+    {
+      scheduled: result.scheduled,
+      trimReason: result.trimReason,
+      firstAt: result.firstAt?.toISOString() ?? null,
+      lastAt: result.lastAt?.toISOString() ?? null,
+      remainingTodayAfter: result.remainingTodayAfter,
+    },
+    `${result.scheduled} invitation(s) scheduled over the next ${parsed.data.minutes} minute(s)${explanation}. The worker must be running for them to go out.`,
+  );
 }

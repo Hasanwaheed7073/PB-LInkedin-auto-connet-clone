@@ -213,6 +213,152 @@ export function toScheduleConfig(settings: {
 }
 
 // ---------------------------------------------------------------------------
+// Burst scheduling
+// ---------------------------------------------------------------------------
+
+export interface ScheduleBurstInput {
+  campaignId: string;
+  /** How many invitations to send in this burst. */
+  count: number;
+  /** How long to spread them over, in minutes. */
+  minutes: number;
+  actorId?: string | null;
+  actorName?: string | null;
+  now?: Date;
+}
+
+export interface ScheduleBurstResult {
+  scheduled: number;
+  /** Requested minus scheduled, with the reason it was trimmed. */
+  trimmedTo: number | null;
+  trimReason: 'CAMPAIGN_DAILY_LIMIT' | 'GLOBAL_DAILY_LIMIT' | 'NOT_ENOUGH_LEADS' | null;
+  firstAt: Date | null;
+  lastAt: Date | null;
+  remainingTodayAfter: number;
+}
+
+/**
+ * Bring `count` waiting jobs forward and spread them across the next `minutes`.
+ *
+ * This exists so the daily decision - "send thirty over the next half hour" -
+ * can be made in the dashboard rather than by editing campaign settings and
+ * regenerating a queue. The operating window and the weekday list are about the
+ * campaign's *standing* rhythm; a burst is an explicit instruction for right
+ * now, and is deliberately allowed to run outside them.
+ *
+ * What it will not do is exceed a limit. The campaign's daily limit and the
+ * global ceiling both still apply, counted against what has actually been sent
+ * today, and the request is trimmed rather than refused so the operator gets
+ * what is available instead of an error.
+ *
+ * Spacing is even, with jitter, and never below fifteen seconds - a burst is a
+ * scheduling convenience, not a way to fire thirty invitations in a second.
+ */
+export async function scheduleBurst(input: ScheduleBurstInput): Promise<ScheduleBurstResult> {
+  const now = input.now ?? new Date();
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: input.campaignId },
+    include: { settings: true },
+  });
+  if (!campaign) throw new Error(`Campaign ${input.campaignId} not found`);
+  if (!campaign.settings) throw new Error(`Campaign ${input.campaignId} has no settings row`);
+
+  const env = serverEnv();
+  const config = toScheduleConfig(campaign.settings);
+  const day = localDayBounds(config.timezone, now);
+
+  const [actionsToday, globalActionsToday] = await Promise.all([
+    countOutreachActions({ from: day.start, to: day.end }, { campaignId: campaign.id }),
+    countOutreachActions({ from: day.start, to: day.end }, {}),
+  ]);
+
+  const campaignRemaining = Math.max(0, campaign.settings.dailyLimit - actionsToday);
+  const globalRemaining = Math.max(0, env.GLOBAL_DAILY_ACTION_LIMIT - globalActionsToday);
+
+  let allowed = Math.min(input.count, campaignRemaining, globalRemaining);
+  let trimReason: ScheduleBurstResult['trimReason'] = null;
+  if (allowed < input.count) {
+    trimReason = campaignRemaining <= globalRemaining ? 'CAMPAIGN_DAILY_LIMIT' : 'GLOBAL_DAILY_LIMIT';
+  }
+
+  const jobs =
+    allowed <= 0
+      ? []
+      : await prisma.queueJob.findMany({
+          where: { campaignId: campaign.id, status: 'WAITING' },
+          orderBy: [{ priority: 'asc' }, { scheduledFor: 'asc' }],
+          take: allowed,
+          select: { id: true },
+        });
+
+  if (jobs.length < allowed) {
+    allowed = jobs.length;
+    if (trimReason === null) trimReason = 'NOT_ENOUGH_LEADS';
+  }
+
+  if (allowed === 0) {
+    return {
+      scheduled: 0,
+      trimmedTo: 0,
+      trimReason: trimReason ?? 'NOT_ENOUGH_LEADS',
+      firstAt: null,
+      lastAt: null,
+      remainingTodayAfter: Math.min(campaignRemaining, globalRemaining),
+    };
+  }
+
+  // Even spacing across the window, with the first one a few seconds out so the
+  // worker has time to pick it up rather than racing this write.
+  const windowMs = Math.max(1, input.minutes) * 60_000;
+  const gap = Math.max(15_000, Math.floor(windowMs / allowed));
+  const times = jobs.map((_, i) => new Date(now.getTime() + 10_000 + i * gap));
+
+  const burstUntil = new Date(now.getTime() + windowMs + 5 * 60_000);
+
+  await prisma.$transaction([
+    ...jobs.map((job, i) =>
+      prisma.queueJob.update({
+        where: { id: job.id },
+        data: { scheduledFor: times[i]!, priority: 0 },
+      }),
+    ),
+    // The override and the reschedule land together: a burst that was allowed
+    // to bypass the window must not outlive the jobs it was authorised for.
+    prisma.campaignSettings.update({
+      where: { campaignId: campaign.id },
+      data: { burstUntil },
+    }),
+  ]);
+
+  await logActivity({
+    action: 'QUEUE_GENERATED',
+    result: 'SUCCESS',
+    actorType: input.actorId ? 'USER' : 'SYSTEM',
+    actorId: input.actorId ?? null,
+    actorName: input.actorName ?? null,
+    campaignId: campaign.id,
+    message: `Burst: ${allowed} invitation(s) scheduled over the next ${input.minutes} minute(s).`,
+    metadata: {
+      requested: input.count,
+      scheduled: allowed,
+      minutes: input.minutes,
+      trimReason,
+      spacingSeconds: Math.round(gap / 1_000),
+    },
+  });
+
+  return {
+    scheduled: allowed,
+    trimmedTo: allowed < input.count ? allowed : null,
+    trimReason,
+    firstAt: times[0] ?? null,
+    lastAt: times[times.length - 1] ?? null,
+    remainingTodayAfter: Math.min(campaignRemaining, globalRemaining) - allowed,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Eligibility
 // ---------------------------------------------------------------------------
 
@@ -284,6 +430,7 @@ export async function evaluateCampaignEligibility(
       globalActionsToday,
       globalDailyLimit: env.GLOBAL_DAILY_ACTION_LIMIT,
       earliestScheduledFor: nextJob?.scheduledFor ?? null,
+      burstUntil: campaign.settings.burstUntil,
     });
 
     results.push({

@@ -5,6 +5,7 @@ import { CheckCircle2, Pencil, XCircle } from 'lucide-react';
 
 import { ActivityTimeline } from '@/components/activity-timeline';
 import { CampaignControls } from '@/components/campaign-controls';
+import { SendBurst } from '@/components/send-burst';
 import { CampaignStatusBadge, QueueStatusBadge } from '@/components/status-badges';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -95,6 +96,12 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
               </Link>
             </Button>
           ) : null}
+          <SendBurst
+            campaignId={id}
+            waitingJobs={queueCounts.waiting}
+            canSend={campaign.active && campaign.status === 'RUNNING'}
+            disabledReason="Activate the campaign first"
+          />
           <CampaignControls
             campaignId={id}
             campaignName={campaign.name}

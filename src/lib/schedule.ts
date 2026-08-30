@@ -157,6 +157,18 @@ export interface EligibilityInput {
   globalDailyLimit: number;
   /** Earliest `scheduledFor` among waiting jobs, if any. */
   earliestScheduledFor?: Date | null;
+  /**
+   * An operator-authorised burst, expiring at this time.
+   *
+   * While it is in the future the operating window and the weekday list are
+   * bypassed - the operator has just said "send these now", and the window
+   * describes the campaign's standing rhythm rather than a safety limit.
+   *
+   * Both daily ceilings still apply, and deliberately so: those exist to
+   * protect the account, and no button in the dashboard should be able to
+   * argue with them.
+   */
+  burstUntil?: Date | null;
 }
 
 export interface EligibilityResult {
@@ -181,7 +193,9 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
   const globalRemaining = Math.max(0, globalDailyLimit - globalActionsToday);
   const remainingToday = Math.min(campaignRemaining, globalRemaining);
 
-  if (new Set(config.operatingDays).size === 0) {
+  const bursting = Boolean(input.burstUntil && input.burstUntil.getTime() > now.getTime());
+
+  if (!bursting && new Set(config.operatingDays).size === 0) {
     return {
       eligible: false,
       reason: 'NO_OPERATING_DAYS',
@@ -190,7 +204,7 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     };
   }
 
-  if (!isWithinOperatingWindow(config, now)) {
+  if (!bursting && !isWithinOperatingWindow(config, now)) {
     return {
       eligible: false,
       reason: 'OUTSIDE_OPERATING_HOURS',
