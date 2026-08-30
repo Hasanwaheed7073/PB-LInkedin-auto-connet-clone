@@ -322,6 +322,12 @@ export const workerFailSchema = z.object({
 export const workerStoppedSchema = z.object({
   workerId: cuidSchema,
   reason: z.string().trim().min(1).max(500),
+  /**
+   * True when the worker finished its work and exited, rather than stopping
+   * because something went wrong. Without it every clean exit is recorded as
+   * the worker's last error and shown to the operator in red.
+   */
+  clean: z.boolean().optional().default(false),
 });
 
 // ---------------------------------------------------------------------------

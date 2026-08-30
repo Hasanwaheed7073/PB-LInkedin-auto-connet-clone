@@ -10,7 +10,7 @@ import { markWorkerStopped } from '@/lib/workers';
  * Clean-shutdown notification. Releases the exclusive run lease so a
  * replacement worker can start without needing `--force-takeover`.
  */
-export const POST = workerRoute(workerStoppedSchema, async ({ workerId, reason }) => {
-  await markWorkerStopped(workerId, reason);
+export const POST = workerRoute(workerStoppedSchema, async ({ workerId, reason, clean }) => {
+  await markWorkerStopped(workerId, reason, clean);
   return NextResponse.json({ ok: true });
 });

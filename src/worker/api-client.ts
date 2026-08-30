@@ -265,17 +265,17 @@ export class WorkerApiClient {
     return this.request('/api/worker/incident', input);
   }
 
-  async reportStopped(workerId: string, reason: string): Promise<{ ok: boolean }> {
-    return this.request('/api/worker/stopped', { workerId, reason });
+  async reportStopped(workerId: string, reason: string, clean = false): Promise<{ ok: boolean }> {
+    return this.request('/api/worker/stopped', { workerId, reason, clean });
   }
 
   /**
    * Best-effort call used on shutdown paths, where a failure to report must not
    * mask the original reason for stopping.
    */
-  async tryReportStopped(workerId: string, reason: string): Promise<void> {
+  async tryReportStopped(workerId: string, reason: string, clean = false): Promise<void> {
     try {
-      await this.reportStopped(workerId, reason);
+      await this.reportStopped(workerId, reason, clean);
     } catch (error) {
       this.logger.warn('Could not report worker shutdown to the dashboard', {
         error: error instanceof Error ? error.message : String(error),

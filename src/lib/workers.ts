@@ -230,6 +230,13 @@ export async function recordHeartbeat(input: HeartbeatInput): Promise<HeartbeatR
 export async function markWorkerStopped(
   workerId: string,
   reason: string,
+  /**
+   * True when the worker finished and exited normally. A clean stop must not
+   * write `lastError`: the dashboard renders that field in red, so recording
+   * "Worker exited" there tells the operator something is wrong when nothing
+   * is. The reason still reaches the activity log either way.
+   */
+  clean = false,
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const updated = await tx.worker.updateMany({
@@ -239,7 +246,9 @@ export async function markWorkerStopped(
         stoppedAt: new Date(),
         browserStatus: 'CLOSED',
         currentJobId: null,
-        lastError: reason.slice(0, 1_000),
+        // Left untouched on a clean stop, so a real error from earlier in the
+        // same run is not quietly overwritten by a benign exit message.
+        ...(clean ? {} : { lastError: reason.slice(0, 1_000) }),
       },
     });
 

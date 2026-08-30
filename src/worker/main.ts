@@ -167,7 +167,8 @@ class Worker {
       });
       return 1;
     } finally {
-      await this.shutdown(this.stopReason ?? 'Worker exited');
+      // A null stopReason means nothing went wrong - the run simply finished.
+      await this.shutdown(this.stopReason ?? 'Worker exited', this.stopReason === null);
     }
   }
 
@@ -734,7 +735,7 @@ class Worker {
     process.on('SIGTERM', () => onSignal('SIGTERM'));
   }
 
-  private async shutdown(reason: string): Promise<void> {
+  private async shutdown(reason: string, clean = false): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
 
     if (this.session) {
@@ -743,7 +744,7 @@ class Worker {
     }
 
     if (this.workerId) {
-      await this.api.tryReportStopped(this.workerId, reason);
+      await this.api.tryReportStopped(this.workerId, reason, clean);
     }
 
     this.logger.info('Worker stopped', { reason });
