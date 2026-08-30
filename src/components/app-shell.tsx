@@ -13,6 +13,7 @@ import { getSystemState } from '@/lib/safety';
 import { formatRelativeTime } from '@/lib/utils';
 import { summarizeWorkers } from '@/lib/workers';
 import { SignOutButton } from '@/components/sign-out-button';
+import { activeBusinessProfile } from '@/lib/business-profile';
 import { MainNav } from '@/components/nav-link';
 
 /**
@@ -31,10 +32,11 @@ export async function AppShell({
   children: React.ReactNode;
   user: { name: string; email: string };
 }) {
-  const [system, workers, incidents] = await Promise.all([
+  const [system, workers, incidents, business] = await Promise.all([
     getSystemState(),
     summarizeWorkers(),
     countIncidents(),
+    activeBusinessProfile(),
   ]);
 
   const holder = workers.leaseHolder;
@@ -60,6 +62,19 @@ export async function AppShell({
             </span>
             <span className="hidden sm:inline">LinkedIn Outreach</span>
           </Link>
+
+          {business ? (
+            <Link
+              href="/choose"
+              className="border-border hover:bg-muted flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+              title="Switch business"
+            >
+              <span className="bg-muted text-muted-foreground rounded px-1 text-[10px] font-semibold">
+                {business.badge ?? business.name.slice(0, 2).toUpperCase()}
+              </span>
+              <span className="max-w-[10rem] truncate">{business.name}</span>
+            </Link>
+          ) : null}
 
           <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
             <span className="text-muted-foreground hidden md:inline">Worker</span>

@@ -214,6 +214,34 @@ model User {
   @@map("users")
 }
 
+/// A business the operator works on. Campaigns, and therefore leads, belong to one.
+///
+/// This exists because the same dashboard serves two unrelated books of business, and
+/// mixing their leads would be worse than an inconvenience: the daily ceilings, the
+/// queue and the outreach history are all shared, so seeing one business's numbers while
+/// working the other is how the wrong list gets sent.
+model BusinessProfile {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+
+  /// Filename in /icp used to score this business's leads, for the operator's reference.
+  icpProfile String?
+
+  /// Short label shown on the switcher, e.g. "RR" or "CR".
+  badge String?
+
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@map("business_profiles")
+}
+
 model Campaign {
   id          String         @id @default(cuid())
   name        String         @unique
@@ -234,6 +262,11 @@ model Campaign {
   messageTemplateId String?
   messageTemplate   MessageTemplate? @relation(fields: [messageTemplateId], references: [id], onDelete: SetNull)
 
+  /// Which business this campaign belongs to. Nullable so existing campaigns survive the
+  /// migration and can be assigned deliberately rather than guessed at.
+  businessProfileId String?
+  businessProfile   BusinessProfile? @relation(fields: [businessProfileId], references: [id], onDelete: SetNull)
+
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
@@ -248,6 +281,7 @@ model Campaign {
 
   @@index([status])
   @@index([active, status])
+  @@index([businessProfileId])
   @@map("campaigns")
 }
 

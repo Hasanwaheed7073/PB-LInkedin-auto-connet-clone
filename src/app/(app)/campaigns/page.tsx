@@ -16,6 +16,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { prisma } from '@/lib/db';
+import { campaignScope } from '@/lib/business-profile';
 import { evaluateCampaignEligibility } from '@/lib/queue';
 import { ELIGIBILITY_MESSAGES } from '@/lib/schedule';
 import { formatNumber, formatOperatingDays, formatRelativeTime, minutesToClock } from '@/lib/utils';
@@ -26,6 +27,9 @@ export const dynamic = 'force-dynamic';
 export default async function CampaignsPage() {
   const [campaigns, eligibility] = await Promise.all([
     prisma.campaign.findMany({
+      // Scoped to the business being worked on, so two unrelated books of
+      // business are never read as one list.
+      where: await campaignScope(),
       orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
       include: {
         settings: true,

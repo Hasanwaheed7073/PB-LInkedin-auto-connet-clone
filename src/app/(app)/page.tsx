@@ -21,6 +21,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Callout, DetailRow, EmptyState, StatusDot } from '@/components/ui/misc';
+import { redirect } from 'next/navigation';
+
+import { activeBusinessProfile } from '@/lib/business-profile';
 import { ELIGIBILITY_MESSAGES } from '@/lib/schedule';
 import { getDashboardSnapshot, getRecentActivity, getRecentErrors } from '@/lib/stats';
 import { formatNumber, formatRelativeTime, formatTimestamp } from '@/lib/utils';
@@ -38,6 +41,11 @@ export const dynamic = 'force-dynamic';
  * placeholder: where there is nothing to show, the panel says so.
  */
 export default async function DashboardPage() {
+  // Ask which business before showing numbers from it. Seeing one book of
+  // business while believing you are looking at the other is how the wrong
+  // list gets worked.
+  if (!(await activeBusinessProfile())) redirect('/choose');
+
   // Flag workers whose heartbeat went stale, so the status shown is honest.
   // Deliberately does not start a replacement worker.
   await detectUnhealthyWorkers();
