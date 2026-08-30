@@ -25,6 +25,7 @@ import {
   firstNameFromEmail,
   HackerNewsWantsHiredProvider,
 } from '../src/engine/discovery/providers/hacker-news';
+import { ClinicalTrialsGovProvider } from '../src/engine/discovery/providers/clinicaltrials-gov';
 import { ExportImportProvider } from '../src/engine/discovery/providers/export-import';
 import { WebSearchLinkedInProvider } from '../src/engine/discovery/providers/web-search';
 import { isFailure, type DiscoveryProvider, type NormalizedCandidate } from '../src/engine/discovery/types';
@@ -41,6 +42,7 @@ function buildProviders(options: Options): DiscoveryProvider[] {
 
   if (want('hn')) chosen.push(new HackerNewsWantsHiredProvider());
   if (want('search')) chosen.push(new WebSearchLinkedInProvider());
+  if (want('ctgov')) chosen.push(new ClinicalTrialsGovProvider());
   for (const path of options.imports) chosen.push(new ExportImportProvider(path, 'phantombuster'));
   return chosen;
 }
