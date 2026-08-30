@@ -271,6 +271,19 @@ export async function activateCampaign(
 
   const { id, generateQueue } = parsed.data;
 
+  // A business set to finding-and-review only cannot have a campaign activated
+  // inside it. The worker gate refuses these too; this is the earlier, clearer
+  // refusal so the operator is told before the confirmation dialog, not after.
+  const owning = await prisma.campaign.findUnique({
+    where: { id },
+    select: { businessProfile: { select: { name: true, outreachEnabled: true } } },
+  });
+  if (owning?.businessProfile && !owning.businessProfile.outreachEnabled) {
+    return actionError(
+      `"${owning.businessProfile.name}" is set to lead finding and review only. Turn outreach on for that business before activating a campaign in it.`,
+    );
+  }
+
   const checks = await getActivationChecks(id);
   const failed = checks.filter((c) => c.blocking && !c.ok);
   if (failed.length > 0) {

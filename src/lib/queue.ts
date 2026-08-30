@@ -386,12 +386,31 @@ export async function evaluateCampaignEligibility(
 
   const campaigns = await client.campaign.findMany({
     where: { active: true, status: 'RUNNING' },
-    include: { settings: true },
+    include: { settings: true, businessProfile: { select: { name: true, outreachEnabled: true } } },
   });
 
   const results: CampaignEligibility[] = [];
 
   for (const campaign of campaigns) {
+    // A business set to finding-and-review only never sends, whatever state its
+    // campaigns are in. Checked here, in the gate the worker consults, rather
+    // than only at activation - a campaign activated before the flag was set
+    // must stop too.
+    if (campaign.businessProfile && !campaign.businessProfile.outreachEnabled) {
+      results.push({
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        eligible: false,
+        reason: 'OUTREACH_DISABLED',
+        nextEligibleAt: null,
+        remainingToday: 0,
+        waitingJobs: await client.queueJob.count({
+          where: { campaignId: campaign.id, status: 'WAITING' },
+        }),
+      });
+      continue;
+    }
+
     if (!campaign.settings) {
       results.push({
         campaignId: campaign.id,
@@ -615,11 +634,22 @@ export async function claimNextJob(params: {
         }),
         tx.campaign.findUniqueOrThrow({
           where: { id: row.campaignId },
-          include: { settings: true, messageTemplate: true },
+          include: {
+            settings: true,
+            messageTemplate: true,
+            businessProfile: { select: { name: true, outreachEnabled: true } },
+          },
         }),
       ]);
 
       if (!campaign.settings) throw new Error('campaign settings disappeared mid-claim');
+
+      // Re-checked inside the claiming transaction, not just in the read-only
+      // gate: the flag may have been set in the moments since that pass, and
+      // this is the last point before an invitation becomes possible.
+      if (campaign.businessProfile && !campaign.businessProfile.outreachEnabled) {
+        throw new ClaimRollback({ reason: 'OUTREACH_DISABLED' });
+      }
 
       // Re-check the daily limit under the transaction. Between the read-only
       // eligibility pass and here, another action may have consumed the budget.

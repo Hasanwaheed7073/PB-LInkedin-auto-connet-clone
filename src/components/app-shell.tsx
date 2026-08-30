@@ -73,6 +73,9 @@ export async function AppShell({
                 {business.badge ?? business.name.slice(0, 2).toUpperCase()}
               </span>
               <span className="max-w-[10rem] truncate">{business.name}</span>
+              {business.outreachEnabled ? null : (
+                <span className="text-warning text-[10px] uppercase">review only</span>
+              )}
             </Link>
           ) : null}
 

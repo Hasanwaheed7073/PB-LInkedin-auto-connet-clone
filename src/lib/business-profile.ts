@@ -26,6 +26,8 @@ export interface BusinessProfileSummary {
   description: string | null;
   badge: string | null;
   icpProfile: string | null;
+  /** False when this business is for finding and reviewing leads only. */
+  outreachEnabled: boolean;
   campaigns: number;
   leads: number;
 }
@@ -46,6 +48,7 @@ export async function listBusinessProfiles(): Promise<BusinessProfileSummary[]> 
     description: row.description,
     badge: row.badge,
     icpProfile: row.icpProfile,
+    outreachEnabled: row.outreachEnabled,
     campaigns: row.campaigns.length,
     leads: row.campaigns.reduce((sum: number, c: { _count: { leads: number } }) => sum + c._count.leads, 0),
   }));

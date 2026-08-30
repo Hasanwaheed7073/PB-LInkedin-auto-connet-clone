@@ -20,6 +20,7 @@ export interface ChooserProfile {
   description: string | null;
   badge: string | null;
   icpProfile: string | null;
+  outreachEnabled: boolean;
   campaigns: number;
   leads: number;
 }
@@ -106,6 +107,13 @@ export function BusinessChooser({ profiles }: { profiles: ChooserProfile[] }) {
                   ) : null}
                 </div>
               </div>
+
+              {profile.outreachEnabled ? null : (
+                <p className="text-warning text-xs">
+                  Lead finding and review only — campaigns here cannot be activated and the worker
+                  will not send from them.
+                </p>
+              )}
 
               <p className="text-muted-foreground text-xs tabular">
                 {formatNumber(profile.campaigns)} campaign(s) · {formatNumber(profile.leads)} lead(s)

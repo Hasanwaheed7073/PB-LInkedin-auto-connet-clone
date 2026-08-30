@@ -232,6 +232,11 @@ model BusinessProfile {
   /// Short label shown on the switcher, e.g. "RR" or "CR".
   badge String?
 
+  /// When false this business is for finding and reviewing leads only. Campaigns inside it
+  /// cannot be activated and the worker will not claim their jobs. Enforced rather than
+  /// documented, because "we agreed not to send from that one" is not a control.
+  outreachEnabled Boolean @default(true)
+
   archivedAt DateTime?
 
   createdAt DateTime @default(now())

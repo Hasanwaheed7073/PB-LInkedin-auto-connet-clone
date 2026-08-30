@@ -145,7 +145,8 @@ export type EligibilityReason =
   | 'DAILY_LIMIT_REACHED'
   | 'GLOBAL_DAILY_LIMIT_REACHED'
   | 'NO_OPERATING_DAYS'
-  | 'NOT_YET_SCHEDULED';
+  | 'NOT_YET_SCHEDULED'
+  | 'OUTREACH_DISABLED';
 
 export interface EligibilityInput {
   config: ScheduleConfig;
@@ -257,6 +258,7 @@ export const ELIGIBILITY_MESSAGES: Record<EligibilityReason, string> = {
   GLOBAL_DAILY_LIMIT_REACHED: 'Global daily action limit reached',
   NO_OPERATING_DAYS: 'No operating days configured - campaign can never run',
   NOT_YET_SCHEDULED: 'Next job is scheduled for later',
+  OUTREACH_DISABLED: 'This business is set to lead finding and review only',
 };
 
 /**
